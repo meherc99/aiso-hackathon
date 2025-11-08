@@ -1,6 +1,10 @@
 import os
 import sys
 from pathlib import Path
+import json
+import re
+import uuid
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -9,6 +13,7 @@ from check_meetings import check_for_meetings, check_for_tasks
 from parse_messages import parse_messages_list
 from slack import fetch_all_messages
 from calendar_server import calendar_store
+from database import get_default_db
 
 
 def _load_env() -> None:
@@ -86,6 +91,9 @@ def _sync_meetings_to_calendar(meetings):
 def master_agent() -> None:
     """Main agent that orchestrates the workflow."""
     _load_env()
+    
+    # Initialize database
+    db = get_default_db()
 
     try:
         client = _create_openai_client()
@@ -101,7 +109,7 @@ def master_agent() -> None:
         if not messages:
             print(f"Error: No messages fetched from Slack channel {channel_id}.", file=sys.stderr)
             sys.exit(2)
-    except Exception as exc:  # pragma: no cover - network errors
+    except Exception as exc:
         print(f"Error fetching from Slack: {exc}", file=sys.stderr)
         sys.exit(2)
 
@@ -110,35 +118,38 @@ def master_agent() -> None:
         print("No new messages found.")
         return
 
+    # Check for meetings and persist
     print(f"Analyzing {len(parsed_messages)} messages for meetings...")
     try:
-        result = check_for_meetings(parsed_messages, client)
-        print(result)
-        _sync_meetings_to_calendar(result)
-    except Exception as exc:  # pragma: no cover - external API
-        print(f"Error calling OpenAI: {exc}", file=sys.stderr)
+        meetings_result = check_for_meetings(parsed_messages, client)
+        if meetings_result:
+            db.add_meetings(meetings_result)
+            print(f"Persisted {len(meetings_result)} meeting(s) to database.")
+        print(meetings_result)
+    except Exception as exc:
+        print(f"Error calling OpenAI for meetings: {exc}", file=sys.stderr)
         sys.exit(3)
     
+    # Check for tasks and persist
     if not mentions:
         print("No mentions found in messages.")
-
     else:
         print(f"Analyzing {len(mentions)} mentioned messages for tasks...")
         try:
             tasks_result = check_for_tasks(mentions, client)
-            print("Mentions found:")
-            print(tasks_result)
-        except Exception as exc:  # pragma: no cover - external API
+            if tasks_result:
+                db.add_tasks(tasks_result)
+                print(f"Persisted {len(tasks_result)} task(s) to database.")
+            print("Tasks found:")
+            print(json.dumps(tasks_result, indent=2, ensure_ascii=False))
+        except Exception as exc:
             print(f"Error calling OpenAI for tasks: {exc}", file=sys.stderr)
             sys.exit(4)
 
-
-    if result:
-        print("Meeting found!")
-        print(result)
+    if meetings_result:
+        print("Meeting(s) found and persisted!")
     else:
         print("No meetings detected.")
-        print(result)
 
 
 if __name__ == "__main__":
