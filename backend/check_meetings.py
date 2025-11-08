@@ -25,27 +25,16 @@ and send the JSON-formatted messages as the user content.
 The function returns the assistant's raw reply string (no parsing).
 """
 
-from typing import List, Dict, Optional, Any
+from typing import List, Dict, Any
 import os
 import json
 import sys
-import openai
-from openai import OpenAI
-import uuid
 from datetime import datetime, timezone
+import uuid
+from dotenv import load_dotenv
+load_dotenv()
 
-try:
-    # If python-dotenv is installed and a .env file exists, load it so env vars are available
-    from dotenv import load_dotenv
-    load_dotenv()
-except Exception:
-    # dotenv is optional; we'll still read environment variables directly
-    pass
-
-
-def send_messages_to_openai(messages: List[Dict[str, str]],
-                            model: str = 'gpt-5',
-                            api_key: Optional[str] = None) -> List[Dict[str, Any]]:
+def check_for_meetings(messages: List[Dict[str, str]], client):
     """Send conversations to OpenAI and return the assistant reply as a string.
 
     - messages: list of dicts each with 'username' and 'message'
@@ -63,66 +52,29 @@ def send_messages_to_openai(messages: List[Dict[str, str]],
         "Do not include any extra text, explanation, or formatting — only the JSON objects."
     )
 
-    # (do not short-circuit on dry_run yet; we want to allow printing the payload)
-
-    # Allow overriding the default model from the environment (but keep explicit model param)
-    model = model or os.environ.get('MODEL', 'gpt-5')
-
-    user_content = json.dumps(messages, ensure_ascii=False)
+    messages = json.dumps(messages, ensure_ascii=False)
 
     chat_messages = [
         {"role": "system", "content": instruction},
-        {"role": "user", "content": user_content}
+        {"role": "user", "content": messages}
     ]
-
-    # Resolve API key from param or environment
-    key = api_key or os.environ.get('OPENAI_API_KEY') or os.environ.get('API_KEY')
-    if not key:
-        raise RuntimeError('No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment.')
-
-    # Use the official openai package if available
-
-
-    client = openai.OpenAI(
-        api_key=key,
-        base_url="https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1"
-    )
-
+    
     # Pass the filtered messages (username + message) correctly structured
     resp = client.chat.completions.create(
-        model="gpt-5-nano",
+        model=os.environ.get('MODEL', 'gpt-5'),
         messages=chat_messages,  # Already contains system instruction + user content with filtered data
+        response_format={"type": "json_object"},
     )
 
-    # Print the full response for debugging
-    
     # Extract assistant content (only the JSON response)
     try:
         assistant_text = resp.choices[0].message.content
+        # Parse the response directly as a list of JSON objects
+        json_objects = json.loads(assistant_text.strip())
     except Exception as e:
-        # Fallback: return full response as string
-        print(f"Error extracting content: {e}", file=sys.stderr)
-        assistant_text = str(resp)
-
-    # Parse multiple JSON objects from the response
-    json_objects: List[Dict[str, Any]] = []
-    try:
-        # Try to parse as a single JSON first
-        single_json = json.loads(assistant_text.strip())
-        json_objects.append(single_json)
-    except json.JSONDecodeError:
-        # If that fails, try to find multiple JSON objects
-        import re
-        # Find all JSON objects in the text (looking for {...} patterns)
-        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
-        matches = re.findall(json_pattern, assistant_text)
-        
-        for match in matches:
-            try:
-                parsed = json.loads(match)
-                json_objects.append(parsed)
-            except json.JSONDecodeError:
-                continue
+        # Handle errors and fallback to an empty list
+        print(f"Error processing response: {e}", file=sys.stderr)
+        json_objects = []
     # Augment each found JSON object with extra fields:
     # - id: UUID4 string
     # - category: always "work"
@@ -144,7 +96,7 @@ def send_messages_to_openai(messages: List[Dict[str, str]],
         # Determine if the meeting is done. Expecting keys:
         # - date_of_meeting: YYYY-MM-DD
         # - start_time: HH:MM (24-hour, UTC)
-        done = False
+        meeting_completed = False
         try:
             date_str = obj.get('date_of_meeting')
             time_str = obj.get('start_time') or '00:00'
@@ -153,12 +105,12 @@ def send_messages_to_openai(messages: List[Dict[str, str]],
                 meeting_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
                 # Treat the parsed time as UTC
                 meeting_dt = meeting_dt.replace(tzinfo=timezone.utc)
-                done = now > meeting_dt
+                meeting_completed = now > meeting_dt
         except Exception:
-            # If parsing fails, leave done as False
-            done = False
+            # If parsing fails, leave meeting_completed as False
+            meeting_completed = False
 
-        obj['done'] = done
+        obj['meeting_completed'] = meeting_completed
 
     # Print all found and augmented JSON objects
     print("\nOpenAI Response - Found {} JSON object(s):".format(len(json_objects)))
@@ -168,14 +120,3 @@ def send_messages_to_openai(messages: List[Dict[str, str]],
 
     # Return the list of augmented JSON objects
     return json_objects
-
-
-if __name__ == '__main__':
-        """
-        Main function - kept for backward compatibility.
-        Note: Use slack.py to run the full pipeline automatically.
-        """
-        print("Note: This module is now called from slack.py")
-        print("Run: python backend/slack.py to execute the full pipeline")
-        print("\nIf you want to use this directly, import and call:")
-        print("  - send_messages_to_openai(parsed_messages)")

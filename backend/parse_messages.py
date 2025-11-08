@@ -26,7 +26,6 @@ except ImportError:
     except ImportError:
         fetch_all_messages = None
 
-# we'll import the openai wrapper lazily when needed
 
 # Mapping of final keys (send_time, message, username) to incoming keys
 INCOMING_KEYS = {
@@ -115,19 +114,3 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> List[Dict
             final.append(entry)
 
     return final
-
-
-def main():
-    """
-    Main function - kept for backward compatibility.
-    Note: Use slack.py to run the full pipeline automatically.
-    """
-    print("Note: This script is now called from slack.py")
-    print("Run: python backend/slack.py to execute the full pipeline")
-    print("\nIf you want to use this directly, please use the functions:")
-    print("  - parse_messages_list(messages) to parse messages")
-    print("  - Then call openai_wrapper.send_messages_to_openai(parsed_messages)")
-
-
-if __name__ == '__main__':
-    main()
