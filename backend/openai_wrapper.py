@@ -25,12 +25,15 @@ and send the JSON-formatted messages as the user content.
 The function returns the assistant's raw reply string (no parsing).
 """
 
-from typing import List, Dict, Optional
+from typing import List, Dict, Optional, Any
 import os
 import json
 import sys
 import openai
 from openai import OpenAI
+import tiktoken
+import uuid
+from datetime import datetime, timezone
 
 try:
     # If python-dotenv is installed and a .env file exists, load it so env vars are available
@@ -43,7 +46,7 @@ except Exception:
 
 def send_messages_to_openai(messages: List[Dict[str, str]],
                             model: str = 'gpt-5',
-                            api_key: Optional[str] = None) -> str:
+                            api_key: Optional[str] = None) -> List[Dict[str, Any]]:
     """Send conversations to OpenAI and return the assistant reply as a string.
 
     - messages: list of dicts each with 'username' and 'message'
@@ -51,13 +54,14 @@ def send_messages_to_openai(messages: List[Dict[str, str]],
     - api_key: optional API key; if None, will read from env OPENAI_API_KEY or API_KEY
     """
     instruction = (
-        "We have this conversation in a JSON format. Your task is to determine when a meeting should be scheduled, based on the messages. "
-        "Return a single JSON object and nothing else. The object must have three keys: "
+        "We have this conversation in a JSON format. Your task is to determine when a meeting should be scheduled, based on the messages. If multiple meetings are mentioned, you should return multiple json objects that follow the same pattern, but with different parameters, depending on the meetings dates, times and also descriptions."
+        "Return multiple JSON objects and nothing else, with the details below. An object must have five keys: "
         "`date_of_meeting` whose value is the date agreed for the meeting in ISO8601 format YYYY-MM-DD, for example: {\"date_of_meeting\": \"2024-06-10\"}, "
         "`start_time` whose value is the agreed meeting time in 24-hour HH:MM format in UTC, for example: {\"time\": \"00:00\"}. "
         "`end_time` whose value is the agreed end time of the meeting. If nothing is agreed, the timestamp returned here should consider a duration of 30 minutes per meeting. The format is also HH:MM in UTC, for example: {\"end_time\": \"00:30\"}. "
-        "An example of a full valid response is: {\"date_of_meeting\": \"2024-06-10\", \"start_time\": \"00:00\", \"end_time\": \"00:30\"}. "
-        "Do not include any extra text, explanation, or formatting — only the JSON object."
+        "`description` whose value is the description of the meeting. This will  be simple text that summerized what the meeting will be about. If nothing is mentioned just leave it blank. It shouldn't be longer than a 20 words." \
+        "`title` whose value is the title of the meeting. This can be derived from the description. It shouldn't be longer than a few words."
+        "Do not include any extra text, explanation, or formatting — only the JSON objects."
     )
 
     # (do not short-circuit on dry_run yet; we want to allow printing the payload)
@@ -101,25 +105,78 @@ def send_messages_to_openai(messages: List[Dict[str, str]],
         print(f"Error extracting content: {e}", file=sys.stderr)
         assistant_text = str(resp)
 
-    # Print the filtered response (JSON content only)
-    print("\nOpenAI Response (content only):")
-    print(assistant_text.strip())
-    
-    return assistant_text.strip()
+    # Parse multiple JSON objects from the response
+    json_objects: List[Dict[str, Any]] = []
+    try:
+        # Try to parse as a single JSON first
+        single_json = json.loads(assistant_text.strip())
+        json_objects.append(single_json)
+    except json.JSONDecodeError:
+        # If that fails, try to find multiple JSON objects
+        import re
+        # Find all JSON objects in the text (looking for {...} patterns)
+        json_pattern = r'\{[^{}]*(?:\{[^{}]*\}[^{}]*)*\}'
+        matches = re.findall(json_pattern, assistant_text)
+        
+        for match in matches:
+            try:
+                parsed = json.loads(match)
+                json_objects.append(parsed)
+            except json.JSONDecodeError:
+                continue
+    # Augment each found JSON object with extra fields:
+    # - id: UUID4 string
+    # - category: always "work"
+    # - done: true if current UTC timestamp is after the meeting date+start_time
+    # - created_at: current UTC timestamp in ISO format
+    now = datetime.now(timezone.utc)
+    created_at = now.isoformat()
+
+    for obj in json_objects:
+        # Ensure we work with a dict
+        if not isinstance(obj, dict):
+            continue
+
+        # Add id and category and created_at
+        obj.setdefault('id', str(uuid.uuid4()))
+        obj['category'] = 'work'
+        obj['created_at'] = created_at
+
+        # Determine if the meeting is done. Expecting keys:
+        # - date_of_meeting: YYYY-MM-DD
+        # - start_time: HH:MM (24-hour, UTC)
+        done = False
+        try:
+            date_str = obj.get('date_of_meeting')
+            time_str = obj.get('start_time') or '00:00'
+            if date_str:
+                # Build a UTC datetime for the meeting
+                meeting_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                # Treat the parsed time as UTC
+                meeting_dt = meeting_dt.replace(tzinfo=timezone.utc)
+                done = now > meeting_dt
+        except Exception:
+            # If parsing fails, leave done as False
+            done = False
+
+        obj['done'] = done
+
+    # Print all found and augmented JSON objects
+    print("\nOpenAI Response - Found {} JSON object(s):".format(len(json_objects)))
+    for i, obj in enumerate(json_objects, 1):
+        print(f"\nJSON Object {i}:")
+        print(json.dumps(obj, indent=2, ensure_ascii=False))
+
+    # Return the list of augmented JSON objects
+    return json_objects
 
 
 if __name__ == '__main__':
-    """
-    Main function - kept for backward compatibility.
-    Note: Use slack.py to run the full pipeline automatically.
-    """
-    print("Note: This module is now called from slack.py")
-    print("Run: python backend/slack.py to execute the full pipeline")
-    print("\nIf you want to use this directly, import and call:")
-    print("  - send_messages_to_openai(parsed_messages)")
-
-{
-  "python.analysis.extraPaths": [
-    ".venv/Lib/site-packages"
-  ]
-}
+        """
+        Main function - kept for backward compatibility.
+        Note: Use slack.py to run the full pipeline automatically.
+        """
+        print("Note: This module is now called from slack.py")
+        print("Run: python backend/slack.py to execute the full pipeline")
+        print("\nIf you want to use this directly, import and call:")
+        print("  - send_messages_to_openai(parsed_messages)")
