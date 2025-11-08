@@ -1,13 +1,16 @@
 import html
-import requests
+import sys
+from pathlib import Path
 from typing import Any, List, Optional, Tuple
-
 from datetime import datetime, date
 
 import gradio as gr
 
 from chat_logic import Message, build_bot_reply, messages_to_history
 from storage import ConversationStore
+
+# Import EventStore from the api subfolder (same frontend directory)
+from api.events import event_store
 
 store = ConversationStore()
 
@@ -166,87 +169,58 @@ def conversation_list_update(selected_id: Optional[str], prioritize_selected: bo
     return gr.update(choices=choices, value=selected_id)
 
 
-def fetch_calendar_events(_: Optional[str]) -> List[dict]:
+def fetch_calendar_events() -> List[dict]:
     """
-    Fetch calendar events from the calendar server API.
+    Fetch calendar events directly from the EventStore.
     
-    Args:
-        _: Conversation ID (currently unused, reserved for future filtering)
-        
     Returns:
-        List[dict]: List of calendar events from the API, or mock data if API is unavailable
+        List[dict]: List of calendar events from the database
     """
     try:
-        # Try to fetch from calendar server API
-        response = requests.get("http://localhost:5000/api/events", timeout=2)
-        if response.status_code == 200:
-            print(response.json())
-            return response.json()
-    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
-        # Calendar server not running, return mock data
-        pass
-    
-    # Fallback mock data if API is unavailable
-    today = date.today().isoformat()
-    return [
-        {
-            "id": "event-1",
-            "title": "Daily Standup",
-            "description": "Team sync-up",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "08:30",
-            "endTime": "09:00",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-        {
-            "id": "event-2",
-            "title": "Client Sync",
-            "description": "Status update with client",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "10:00",
-            "endTime": "11:00",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-        {
-            "id": "event-3",
-            "title": "Product Review",
-            "description": "Review latest feature progress",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "13:30",
-            "endTime": "14:00",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-        {
-            "id": "event-4",
-            "title": "1:1 Check-in",
-            "description": "Weekly 1:1",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "16:00",
-            "endTime": "16:30",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-    ]
+        # Directly call the event_store instead of making HTTP request
+        events = event_store.list_events()
+        return events
+    except Exception as e:
+        print(f"Error fetching calendar events: {e}")
+        # Fallback mock data if database is unavailable
+        today = date.today().isoformat()
+        return [
+            {
+                "id": "event-1",
+                "title": "Daily Standup",
+                "description": "Team sync-up",
+                "startDate": today,
+                "endDate": today,
+                "startTime": "08:30",
+                "endTime": "09:00",
+                "category": "",
+                "done": False,
+                "created_at": datetime.now().isoformat(),
+            },
+            {
+                "id": "event-2",
+                "title": "Client Sync",
+                "description": "Status update with client",
+                "startDate": today,
+                "endDate": today,
+                "startTime": "10:00",
+                "endTime": "11:00",
+                "category": "",
+                "done": False,
+                "created_at": datetime.now().isoformat(),
+            },
+        ]
 
 
 def get_todays_events() -> List[dict]:
     """Filter calendar events for the current day."""
-    events = fetch_calendar_events()
     today_str = date.today().isoformat()
+    events = fetch_calendar_events()
     todays_events = [
         event for event in events if event.get("startDate") == today_str
     ]
+    print("todays_events")
+    print(todays_events)
     return todays_events
 
 
@@ -352,7 +326,7 @@ def handle_user_message(
             conversation_id,
             prioritize_selected=created_now,
         )
-        schedule_html = render_schedule(get_todays_events(conversation_id))
+        schedule_html = render_schedule(get_todays_events())
         tasks_html = render_tasks(fetch_task_list(conversation_id))
         return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
@@ -369,7 +343,7 @@ def handle_user_message(
         conversation_id,
         prioritize_selected=created_now,
     )
-    schedule_html = render_schedule(get_todays_events(conversation_id))
+    schedule_html = render_schedule(get_todays_events())
     tasks_html = render_tasks(fetch_task_list(conversation_id))
     return updated_history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
@@ -385,7 +359,7 @@ def initialize_interface() -> Tuple[List[Message], str, str, Any, str, str]:
     messages = store.fetch_messages(conversation_id)
     history = messages_to_history(messages)
     sidebar_update = conversation_list_update(conversation_id)
-    schedule_html = render_schedule(get_todays_events(conversation_id))
+    schedule_html = render_schedule(get_todays_events())
     tasks_html = render_tasks(fetch_task_list(conversation_id))
     return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
@@ -396,7 +370,7 @@ def start_new_conversation() -> Tuple[List[Message], str, str, Any, str, str]:
         conversation_id,
         prioritize_selected=True,
     )
-    schedule_html = render_schedule(get_todays_events(conversation_id))
+    schedule_html = render_schedule(get_todays_events())
     tasks_html = render_tasks(fetch_task_list(conversation_id))
     return [], "", conversation_id, sidebar_update, schedule_html, tasks_html
 
@@ -409,7 +383,7 @@ def clear_current_conversation(
         sidebar_update = conversation_list_update(conversation_id)
         messages = store.fetch_messages(conversation_id)
         history = messages_to_history(messages)
-        schedule_html = render_schedule(get_todays_events(conversation_id))
+        schedule_html = render_schedule(get_todays_events())
         tasks_html = render_tasks(fetch_task_list(conversation_id))
         return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
@@ -418,7 +392,7 @@ def clear_current_conversation(
         new_id,
         prioritize_selected=True,
     )
-    schedule_html = render_schedule(get_todays_events(new_id))
+    schedule_html = render_schedule(get_todays_events())
     tasks_html = render_tasks(fetch_task_list(new_id))
     return [], "", new_id, sidebar_update, schedule_html, tasks_html
 
@@ -432,14 +406,14 @@ def load_conversation(
             new_id,
             prioritize_selected=True,
         )
-        schedule_html = render_schedule(get_todays_events(new_id))
+        schedule_html = render_schedule(get_todays_events())
         tasks_html = render_tasks(fetch_task_list(new_id))
         return [], "", new_id, sidebar_update, schedule_html, tasks_html
 
     messages = store.fetch_messages(conversation_id)
     history = messages_to_history(messages)
     sidebar_update = conversation_list_update(conversation_id)
-    schedule_html = render_schedule(get_todays_events(conversation_id))
+    schedule_html = render_schedule(get_todays_events())
     tasks_html = render_tasks(fetch_task_list(conversation_id))
     return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
@@ -488,7 +462,9 @@ def build_app() -> gr.Blocks:
                             send = gr.Button("➤", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
 
                     with gr.Column(scale=2, min_width=260):
-                        initial_schedule = render_schedule(get_todays_events(None))
+                        initial_schedule = render_schedule(get_todays_events())
+                        print("initial_schedule")
+                        print(initial_schedule)
                         initial_tasks = render_tasks(fetch_task_list(None))
                         with gr.Column(elem_classes=["panel-card"]):
                             gr.Markdown("### Today's Calendar")
@@ -592,6 +568,133 @@ def build_app() -> gr.Blocks:
             ],
             queue=False,
         )
+
+    # ============================================================================
+    # REST API ENDPOINTS FOR REACT CALENDAR
+    # ============================================================================
+    
+    @demo.app.get("/api/events")
+    async def api_get_events():
+        """Get all events from the database"""
+        try:
+            events = event_store.list_events()
+            return events
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.post("/api/events")
+    async def api_create_event(event_data: dict):
+        """Create a new event"""
+        try:
+            # Map frontend format to EventStore format
+            event_id = event_store.add_event(
+                title=event_data.get("title", "Untitled"),
+                description=event_data.get("description", ""),
+                start_date=event_data.get("startDate", ""),
+                end_date=event_data.get("endDate", ""),
+                start_time=event_data.get("startTime", ""),
+                end_time=event_data.get("endTime", ""),
+                category=event_data.get("category", ""),
+                done=event_data.get("done", False)
+            )
+            # Return the created event
+            return event_store.get_event(event_id)
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.put("/api/events/{event_id}")
+    async def api_update_event(event_id: str, event_data: dict):
+        """Update an existing event"""
+        try:
+            # Map camelCase to snake_case for database
+            updates = {}
+            if "title" in event_data:
+                updates["title"] = event_data["title"]
+            if "description" in event_data:
+                updates["description"] = event_data["description"]
+            if "startDate" in event_data:
+                updates["start_date"] = event_data["startDate"]
+            if "endDate" in event_data:
+                updates["end_date"] = event_data["endDate"]
+            if "startTime" in event_data:
+                updates["start_time"] = event_data["startTime"]
+            if "endTime" in event_data:
+                updates["end_time"] = event_data["endTime"]
+            if "category" in event_data:
+                updates["category"] = event_data["category"]
+            if "done" in event_data:
+                updates["done"] = event_data["done"]
+            
+            event_store.update_event(event_id, **updates)
+            return event_store.get_event(event_id)
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.delete("/api/events/{event_id}")
+    async def api_delete_event(event_id: str):
+        """Delete an event"""
+        try:
+            event_store.delete_event(event_id)
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.get("/api/categories")
+    async def api_get_categories():
+        """Get all categories"""
+        try:
+            categories = event_store.list_categories()
+            return categories
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.post("/api/categories")
+    async def api_create_category(category_data: dict):
+        """Create a new category"""
+        try:
+            category_id = event_store.add_category(
+                name=category_data.get("name", "Unnamed"),
+                color=category_data.get("color", "#666666")
+            )
+            # Return the created category
+            categories = event_store.list_categories()
+            for cat in categories:
+                if cat["id"] == category_id:
+                    return cat
+            return {"error": "Category not found after creation"}, 500
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.put("/api/categories/{category_id}")
+    async def api_update_category(category_id: int, category_data: dict):
+        """Update a category"""
+        try:
+            # SQLite EventStore doesn't have update_category, only add/delete
+            # For now, return error - you may need to add this method to EventStore
+            return {"error": "Update category not implemented"}, 501
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.delete("/api/categories/{category_id}")
+    async def api_delete_category(category_id: int):
+        """Delete a category"""
+        try:
+            event_store.delete_category(category_id)
+            return {"success": True}
+        except Exception as e:
+            return {"error": str(e)}, 500
+    
+    @demo.app.get("/api/categories/{category_id}")
+    async def api_get_category(category_id: int):
+        """Get a specific category by ID"""
+        try:
+            categories = event_store.list_categories()
+            for cat in categories:
+                if cat["id"] == category_id:
+                    return cat
+            return {"error": "Category not found"}, 404
+        except Exception as e:
+            return {"error": str(e)}, 500
 
     return demo
 

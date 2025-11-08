@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 
 // API base URL - change this if your backend runs on a different port
-const API_BASE = 'http://localhost:5000/api'
+const API_BASE = 'http://localhost:7860/api'
 
 /**
  * Fetch all events from the backend API
@@ -58,7 +58,7 @@ export async function createEvent({ title, description, startDate, endDate, star
       },
       body: JSON.stringify(eventData)
     })
-
+    console.log(response)
     if (!response.ok) {
       throw new Error(`HTTP error! status: ${response.status}`)
     }
