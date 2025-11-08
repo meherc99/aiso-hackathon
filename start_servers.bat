@@ -16,7 +16,7 @@ echo.
 echo ========================================
 echo Both servers are running!
 echo ========================================
-echo Calendar API: http://localhost:5000/api/events
+echo Calendar API: http://localhost:5050/api/events
 echo Chatbot UI:   http://localhost:7860
 echo.
 echo Press Ctrl+C to stop the chatbot

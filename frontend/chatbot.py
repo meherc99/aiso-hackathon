@@ -481,12 +481,12 @@ def build_app() -> gr.Blocks:
             with gr.TabItem("Full Calendar", id="calendar_tab"):
                 
                 # Iframe to embed the React calendar app
-                # The calendar will be served from http://localhost:5000 (calendar server)
+                # The calendar will be served from http://localhost:5050 (calendar server)
                 # or from http://localhost:5173 (Vite dev server)
                 calendar_iframe = gr.HTML(
                     """
                     <iframe 
-                        src="http://localhost:5000/" 
+                        src="http://localhost:5050/" 
                         width="100%" 
                         height="800px" 
                         frameborder="0"
@@ -498,7 +498,7 @@ def build_app() -> gr.Blocks:
                         <ol style="text-align: left; display: inline-block;">
                             <li>Calendar server is running: <code>python backend/calendar_server.py</code></li>
                             <li>Or React dev server is running: <code>cd src && npm run dev</code></li>
-                            <li>Try accessing directly: <a href="http://localhost:5000" target="_blank">http://localhost:5000</a></li>
+                            <li>Try accessing directly: <a href="http://localhost:5050" target="_blank">http://localhost:5050</a></li>
                         </ol>
                     </iframe>
                     """

@@ -31,7 +31,6 @@ import json
 import sys
 import openai
 from openai import OpenAI
-import tiktoken
 import uuid
 from datetime import datetime, timezone
 

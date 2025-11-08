@@ -32,7 +32,7 @@ The chatbot application now features a **tabbed interface** with two main views:
                     ↓
         ┌───────────────────────────┐
         │  Calendar Server (Port    │
-        │  5000) REST API + Static  │
+        │  5050) REST API + Static  │
         │  Files                    │
         └───────────────────────────┘
                     ↓
@@ -101,7 +101,7 @@ If you're running the React app on a different port (e.g., Vite dev server on po
    cd ..
    ```
 2. The calendar server will serve the built files from `src/dist/`
-3. Calendar tab will load from: `http://localhost:5000/`
+3. Calendar tab will load from: `http://localhost:5050/`
 
 ### Option B: Vite Dev Server (Development)
 1. Start the Vite dev server:
@@ -126,7 +126,7 @@ If you're running the React app on a different port (e.g., Vite dev server on po
    ```bash
    python backend/calendar_server.py
    ```
-   Should show: `Calendar Server starting on http://localhost:5000`
+   Should show: `Calendar Server starting on http://localhost:5050`
 
 2. **Check if React app is built:**
    ```bash
@@ -136,7 +136,7 @@ If you're running the React app on a different port (e.g., Vite dev server on po
    ```
 
 3. **Try accessing calendar directly:**
-   - Open `http://localhost:5000/` in a browser
+   - Open `http://localhost:5050/` in a browser
    - If it works, refresh the chatbot tab
 
 4. **Use Vite dev server instead:**
@@ -177,7 +177,7 @@ Currently, the React app uses localStorage. To sync with the chat:
 **Edit `src/store/events.js`:**
 ```javascript
 // Replace localStorage calls with API calls
-const API_BASE = 'http://localhost:5000/api';
+const API_BASE = 'http://localhost:5050/api';
 
 export const loadEvents = async () => {
   const response = await fetch(`${API_BASE}/events`);
@@ -247,7 +247,7 @@ with gr.Tabs() as tabs:
 calendar_iframe = gr.HTML(
     """
     <iframe 
-        src="http://localhost:5000/" 
+        src="http://localhost:5050/"
         width="100%" 
         height="800px" 
         frameborder="0"

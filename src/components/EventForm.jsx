@@ -1,7 +1,7 @@
-import React, { useEffect, useState } from 'react'
+import React, { useEffect, useMemo, useState } from 'react'
 import { createEvent, loadCategories, createCategory } from '../store/events'
 
-export default function EventForm({ onCreate, onUpdate, editing, onCancel }) {
+export default function EventForm({ events = [], onCreate, onUpdate, editing, onCancel }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -41,13 +41,77 @@ export default function EventForm({ onCreate, onUpdate, editing, onCancel }) {
     }
   }, [editing])
 
+  const timedEvents = useMemo(() => Array.isArray(events) ? events : [], [events])
+
+  function timeToMinutes(value) {
+    if (!value || typeof value !== 'string') return null
+    const match = value.match(/^(\d{1,2}):(\d{2})$/)
+    if (!match) return null
+    const hours = Number(match[1])
+    const minutes = Number(match[2])
+    if (
+      Number.isNaN(hours) || Number.isNaN(minutes) ||
+      hours < 0 || hours > 23 || minutes < 0 || minutes > 59
+    ) {
+      return null
+    }
+    return hours * 60 + minutes
+  }
+
+  function computeRange(event) {
+    const start = timeToMinutes(event.startTime)
+    const end = timeToMinutes(event.endTime)
+
+    if (start === null && end === null) {
+      // Treat events without explicit times as occupying the full day
+      return { start: 0, end: 24 * 60 }
+    }
+
+    const safeStart = start ?? 0
+    let safeEnd = end
+    if (safeEnd === null) {
+      safeEnd = start !== null ? Math.min(start + 60, 24 * 60) : 24 * 60
+    }
+    if (safeEnd <= safeStart) {
+      safeEnd = Math.min(safeStart + 1, 24 * 60)
+    }
+    return { start: safeStart, end: safeEnd }
+  }
+
+  function hasConflict(candidate, excludeId) {
+    if (!candidate.startDate) return false
+    const candidateRange = computeRange(candidate)
+
+    return timedEvents.some(existing => {
+      if (!existing || existing.id === excludeId) return false
+      if (existing.startDate !== candidate.startDate) return false
+
+      const existingRange = computeRange(existing)
+      const overlaps = existingRange.start < candidateRange.end && candidateRange.start < existingRange.end
+      return overlaps
+    })
+  }
+
   function handleSubmit(e) {
     // Prevent the browser's default form submission so we can handle it in React
     e.preventDefault()
+
+    const payload = { title, description, startDate, endDate, startTime, endTime, category }
+
+    if (!startDate) {
+      window.alert('Please select a start date for the event.')
+      return
+    }
+
+    if (hasConflict(payload, editing?.id)) {
+      window.alert('There is already a meeting scheduled for this time. Please choose a different slot.')
+      return
+    }
+
     if (editing) {
-      onUpdate(editing.id, { title, description, startDate, endDate, startTime, endTime, category })
+      onUpdate(editing.id, payload)
     } else {
-      const ev = createEvent({ title, description, startDate, endDate, startTime, endTime, category })
+      const ev = createEvent(payload)
       onCreate(ev)
     }
     clear()

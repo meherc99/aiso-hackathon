@@ -313,7 +313,7 @@ def serve_react_app(path: str):
 
 def main():
     """Start the calendar server."""
-    port = int(os.environ.get("CALENDAR_PORT", 5000))
+    port = int(os.environ.get("CALENDAR_PORT", 5050))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     
     print(f"🚀 Calendar Server starting on http://localhost:{port}")
