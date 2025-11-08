@@ -431,47 +431,79 @@ def build_app() -> gr.Blocks:
         gr.HTML(PANEL_CSS)
         conversation_state = gr.State()
 
-        with gr.Row(equal_height=True):
-            with gr.Column(scale=1, min_width=240, elem_classes=["sidebar-column"]):
-                with gr.Column(elem_classes=["panel-card", "conversation-card"]):
-                    gr.Markdown("### Conversations", elem_classes=["sidebar-heading"])
-                    new_conversation_btn = gr.Button("New", size="sm", elem_classes=["sidebar-new-btn"])
-                    conversation_list = gr.Radio(
-                        label="",
-                        show_label=False,
-                        choices=[],
-                        value=None,
-                        interactive=True,
-                        container=True,
-                    )
+        # Tab system for Chat and Calendar views
+        with gr.Tabs() as tabs:
+            # Chat Tab
+            with gr.TabItem("Chat Assistant", id="chat_tab"):
+                with gr.Row(equal_height=True):
+                    with gr.Column(scale=1, min_width=240, elem_classes=["sidebar-column"]):
+                        with gr.Column(elem_classes=["panel-card", "conversation-card"]):
+                            gr.Markdown("### Conversations", elem_classes=["sidebar-heading"])
+                            new_conversation_btn = gr.Button("New", size="sm", elem_classes=["sidebar-new-btn"])
+                            conversation_list = gr.Radio(
+                                label="",
+                                show_label=False,
+                                choices=[],
+                                value=None,
+                                interactive=True,
+                                container=True,
+                            )
 
-            with gr.Column(scale=4):
-                chatbot = gr.Chatbot(
-                    label="Chat",
-                    height="80vh",
-                    type="messages",
+                    with gr.Column(scale=4):
+                        chatbot = gr.Chatbot(
+                            label="Chat",
+                            height="80vh",
+                            type="messages",
+                        )
+                        with gr.Row():
+                            
+                            message = gr.Textbox(
+                                show_label=False,
+                                placeholder="Send a message…",
+                                autofocus=True,
+                                lines=1,
+                                max_lines=3,
+                                scale=9,
+                            )
+                            send = gr.Button("➤", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
+
+                    with gr.Column(scale=2, min_width=260):
+                        initial_schedule = render_schedule(get_todays_events(None))
+                        initial_tasks = render_tasks(fetch_task_list(None))
+                        with gr.Column(elem_classes=["panel-card"]):
+                            gr.Markdown("### Today's Calendar")
+                            schedule_panel = gr.HTML(initial_schedule)
+                        with gr.Column(elem_classes=["panel-card"]):
+                            gr.Markdown("### Tasks")
+                            tasks_panel = gr.HTML(initial_tasks)
+            
+            # Calendar Tab
+            with gr.TabItem("Full Calendar", id="calendar_tab"):
+                
+                # Iframe to embed the React calendar app
+                # The calendar will be served from http://localhost:5000 (calendar server)
+                # or from http://localhost:5173 (Vite dev server)
+                calendar_iframe = gr.HTML(
+                    """
+                    <iframe 
+                        src="http://localhost:5000/" 
+                        width="100%" 
+                        height="800px" 
+                        frameborder="0"
+                        style="border: 1px solid #ddd; border-radius: 8px; background: white;"
+                        onload="this.style.display='block';"
+                        onerror="this.innerHTML='<div style=padding:20px;text-align:center;>Calendar app not available. Please ensure:<br>1. Calendar server is running: python backend/calendar_server.py<br>2. Or React dev server is running: cd src && npm run dev</div>';"
+                    >
+                        <p>Loading calendar... If this message persists, please check:</p>
+                        <ol style="text-align: left; display: inline-block;">
+                            <li>Calendar server is running: <code>python backend/calendar_server.py</code></li>
+                            <li>Or React dev server is running: <code>cd src && npm run dev</code></li>
+                            <li>Try accessing directly: <a href="http://localhost:5000" target="_blank">http://localhost:5000</a></li>
+                        </ol>
+                    </iframe>
+                    """
                 )
-                with gr.Row():
-                    
-                    message = gr.Textbox(
-                        show_label=False,
-                        placeholder="Send a message…",
-                        autofocus=True,
-                        lines=1,
-                        max_lines=3,
-                        scale=9,
-                    )
-                    send = gr.Button("➤", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
-
-            with gr.Column(scale=2, min_width=260):
-                initial_schedule = render_schedule(get_todays_events(None))
-                initial_tasks = render_tasks(fetch_task_list(None))
-                with gr.Column(elem_classes=["panel-card"]):
-                    gr.Markdown("### Today’s Calendar")
-                    schedule_panel = gr.HTML(initial_schedule)
-                with gr.Column(elem_classes=["panel-card"]):
-                    gr.Markdown("### Tasks")
-                    tasks_panel = gr.HTML(initial_tasks)
+             
 
         demo.load(
             initialize_interface,
