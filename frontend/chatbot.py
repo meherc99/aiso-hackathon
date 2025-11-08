@@ -40,7 +40,7 @@ def handle_user_message(
         return history, "", conversation_id, sidebar_update
 
     store.append_message(conversation_id, "user", cleaned)
-    bot_reply = build_bot_reply(cleaned)
+    bot_reply = build_bot_reply(cleaned, history)
     store.append_message(conversation_id, "assistant", bot_reply)
     store.update_title_if_missing(conversation_id, cleaned)
 
