@@ -1,28 +1,43 @@
 import { v4 as uuidv4 } from 'uuid'
 
-const KEY = 'simple_calendar_events_v1'
+// API base URL - change this if your backend runs on a different port
+const API_BASE = 'http://localhost:5000/api'
 
-export function loadEvents() {
+/**
+ * Fetch all events from the backend API
+ * @returns {Promise<Array>} Array of event objects
+ */
+export async function loadEvents() {
   try {
-    const raw = localStorage.getItem(KEY)
-    return raw ? JSON.parse(raw) : []
+    const response = await fetch(`${API_BASE}/events`)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    // Backend returns array directly, not wrapped in { events: [...] }
+    return Array.isArray(data) ? data : []
   } catch (err) {
-    console.error('Failed to load events', err)
+    console.error('Failed to load events from API', err)
     return []
   }
 }
 
+/**
+ * Save events is no longer needed as each operation saves directly to backend
+ * Keeping it as a no-op for backwards compatibility
+ */
 export function saveEvents(events) {
-  try {
-    localStorage.setItem(KEY, JSON.stringify(events))
-  } catch (err) {
-    console.error('Failed to save events', err)
-  }
+  console.warn('saveEvents is deprecated - use createEvent, updateEvent, or deleteEvent instead')
 }
 
-export function createEvent({ title, description, startDate, endDate, startTime, endTime, category }) {
+/**
+ * Create a new event in the backend
+ * @param {Object} eventData - Event data
+ * @returns {Promise<Object>} The created event
+ */
+export async function createEvent({ title, description, startDate, endDate, startTime, endTime, category }) {
   const now = new Date().toISOString()
-  return {
+  const eventData = {
     id: uuidv4(),
     title: title || 'Untitled',
     description: description || '',
@@ -32,7 +47,79 @@ export function createEvent({ title, description, startDate, endDate, startTime,
     endDate: normalizeDateToISO(endDate),
     startTime: startTime || '',
     endTime: endTime || '',
-    category: category || '' // Store category ID only, not object
+    category: category || ''
+  }
+
+  try {
+    const response = await fetch(`${API_BASE}/events`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(eventData)
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const result = await response.json()
+    // Backend returns event directly, not wrapped in { event: {...} }
+    return result
+  } catch (err) {
+    console.error('Failed to create event', err)
+    throw err
+  }
+}
+
+/**
+ * Update an existing event in the backend
+ * @param {string} eventId - Event ID
+ * @param {Object} eventData - Updated event data
+ * @returns {Promise<Object>} The updated event
+ */
+export async function updateEvent(eventId, eventData) {
+  try {
+    const response = await fetch(`${API_BASE}/events/${eventId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(eventData)
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const result = await response.json()
+    // Backend returns event directly, not wrapped in { event: {...} }
+    return result
+  } catch (err) {
+    console.error('Failed to update event', err)
+    throw err
+  }
+}
+
+/**
+ * Delete an event from the backend
+ * @param {string} eventId - Event ID
+ * @returns {Promise<void>}
+ */
+export async function deleteEvent(eventId) {
+  try {
+    const response = await fetch(`${API_BASE}/events/${eventId}`, {
+      method: 'DELETE'
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return true
+  } catch (err) {
+    console.error('Failed to delete event', err)
+    throw err
   }
 }
 
@@ -40,32 +127,27 @@ export function createEvent({ title, description, startDate, endDate, startTime,
  * Get or create default categories (Work, Personal).
  * Returns { workId, personalId }
  */
-function ensureDefaultCategories() {
-  let cats = loadCategories()
+async function ensureDefaultCategories() {
+  let cats = await loadCategories()
   
   // Check if Work and Personal already exist
   let work = cats.find(c => c.name === 'Work')
   let personal = cats.find(c => c.name === 'Personal')
   
   if (!work) {
-    work = {
-      id: uuidv4(),
+    work = await createCategory({
       name: 'Work',
       color: '#3089ce'
-    }
-    cats.push(work)
+    })
   }
   
   if (!personal) {
-    personal = {
-      id: uuidv4(),
+    personal = await createCategory({
       name: 'Personal',
       color: '#41ba49'
-    }
-    cats.push(personal)
+    })
   }
   
-  saveCategories(cats)
   return { workId: work.id, personalId: personal.id }
 }
 
@@ -73,11 +155,11 @@ function ensureDefaultCategories() {
  * Generate sample events with default categories.
  * Call this function instead of using a static export.
  */
-export function getSampleEvents() {
-  const { workId, personalId } = ensureDefaultCategories()
+export async function getSampleEvents() {
+  const { workId, personalId } = await ensureDefaultCategories()
   
-  return [
-    createEvent({ 
+  const sampleData = [
+    { 
       title: 'Team Meeting', 
       description: 'Discuss roadmap', 
       startDate: new Date().toISOString().slice(0,10), 
@@ -85,8 +167,8 @@ export function getSampleEvents() {
       startTime: '09:00',
       endTime: '10:30',
       category: workId 
-    }),
-    createEvent({ 
+    },
+    { 
       title: 'Doctor', 
       description: 'Annual checkup', 
       startDate: addDaysISO(2), 
@@ -94,8 +176,8 @@ export function getSampleEvents() {
       startTime: '14:00',
       endTime: '15:00',
       category: personalId 
-    }),
-    createEvent({ 
+    },
+    { 
       title: 'Project deadline', 
       description: 'Finish MVP', 
       startDate: addDaysISO(7), 
@@ -103,8 +185,17 @@ export function getSampleEvents() {
       startTime: '17:00',
       endTime: '18:00',
       category: workId 
-    })
+    }
   ]
+
+  // Create all sample events
+  const events = []
+  for (const data of sampleData) {
+    const event = await createEvent(data)
+    events.push(event)
+  }
+  
+  return events
 }
 
 function addDaysISO(days) {
@@ -150,45 +241,140 @@ function normalizeDateToISO(input) {
   return input
 }
 
-// Category management
-const CAT_KEY = 'simple_calendar_categories_v1'
+// ============================================================================
+// Category Management API
+// ============================================================================
 
-export function loadCategories() {
+/**
+ * Load all categories from backend
+ * @returns {Promise<Array>} Array of category objects
+ */
+export async function loadCategories() {
   try {
-    const raw = localStorage.getItem(CAT_KEY)
-    if (!raw) return []
-    return JSON.parse(raw)
+    const response = await fetch(`${API_BASE}/categories`)
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    // Backend returns array directly, not wrapped in { categories: [...] }
+    return Array.isArray(data) ? data : []
   } catch (err) {
-    console.error('Failed to load categories', err)
+    console.error('Failed to load categories from API', err)
     return []
   }
 }
 
+/**
+ * Save categories is deprecated - use createCategory, updateCategory, deleteCategory
+ */
 export function saveCategories(categories) {
-  try {
-    localStorage.setItem(CAT_KEY, JSON.stringify(categories))
-  } catch (err) {
-    console.error('Failed to save categories', err)
-  }
+  console.warn('saveCategories is deprecated - use createCategory, updateCategory, or deleteCategory instead')
 }
 
-export function createCategory(categoryData) {
-  const cats = loadCategories()
+/**
+ * Create a new category in the backend
+ * @param {Object} categoryData - Category data with name and color
+ * @returns {Promise<Object>} The created category
+ */
+export async function createCategory(categoryData) {
   const cat = {
     id: uuidv4(),
     name: (categoryData && categoryData.name) ? String(categoryData.name) : 'Unnamed',
     color: (categoryData && categoryData.color) ? String(categoryData.color) : '#666666'
   }
-  cats.push(cat)
-  saveCategories(cats)
-  return cat
+
+  try {
+    const response = await fetch(`${API_BASE}/categories`, {
+      method: 'POST',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(cat)
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const result = await response.json()
+    // Backend returns category directly, not wrapped
+    return result
+  } catch (err) {
+    console.error('Failed to create category', err)
+    throw err
+  }
+}
+
+/**
+ * Update an existing category
+ * @param {string} categoryId - Category ID
+ * @param {Object} categoryData - Updated category data
+ * @returns {Promise<Object>} The updated category
+ */
+export async function updateCategory(categoryId, categoryData) {
+  try {
+    const response = await fetch(`${API_BASE}/categories/${categoryId}`, {
+      method: 'PUT',
+      headers: {
+        'Content-Type': 'application/json',
+      },
+      body: JSON.stringify(categoryData)
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    const result = await response.json()
+    // Backend returns category directly, not wrapped
+    return result
+  } catch (err) {
+    console.error('Failed to update category', err)
+    throw err
+  }
+}
+
+/**
+ * Delete a category
+ * @param {string} categoryId - Category ID
+ * @returns {Promise<void>}
+ */
+export async function deleteCategory(categoryId) {
+  try {
+    const response = await fetch(`${API_BASE}/categories/${categoryId}`, {
+      method: 'DELETE'
+    })
+
+    if (!response.ok) {
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+
+    return true
+  } catch (err) {
+    console.error('Failed to delete category', err)
+    throw err
+  }
 }
 
 /**
  * Get category by ID. Returns the full category object { id, name, color } or null.
+ * @param {string} categoryId - Category ID
+ * @returns {Promise<Object|null>} Category object or null
  */
-export function getCategoryById(categoryId) {
+export async function getCategoryById(categoryId) {
   if (!categoryId) return null
-  const cats = loadCategories()
-  return cats.find(c => c.id === categoryId) || null
+  
+  try {
+    const response = await fetch(`${API_BASE}/categories/${categoryId}`)
+    if (!response.ok) {
+      if (response.status === 404) return null
+      throw new Error(`HTTP error! status: ${response.status}`)
+    }
+    const data = await response.json()
+    // Backend returns category directly, not wrapped
+    return data || null
+  } catch (err) {
+    console.error('Failed to get category', err)
+    return null
+  }
 }

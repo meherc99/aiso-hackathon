@@ -1,4 +1,5 @@
 import html
+import requests
 from typing import Any, List, Optional, Tuple
 
 from datetime import datetime, date
@@ -166,7 +167,26 @@ def conversation_list_update(selected_id: Optional[str], prioritize_selected: bo
 
 
 def fetch_calendar_events(_: Optional[str]) -> List[dict]:
-    """Placeholder for real calendar events backing. Replace with real fetch."""
+    """
+    Fetch calendar events from the calendar server API.
+    
+    Args:
+        _: Conversation ID (currently unused, reserved for future filtering)
+        
+    Returns:
+        List[dict]: List of calendar events from the API, or mock data if API is unavailable
+    """
+    try:
+        # Try to fetch from calendar server API
+        response = requests.get("http://localhost:5000/api/events", timeout=2)
+        if response.status_code == 200:
+            print(response.json())
+            return response.json()
+    except (requests.exceptions.ConnectionError, requests.exceptions.Timeout):
+        # Calendar server not running, return mock data
+        pass
+    
+    # Fallback mock data if API is unavailable
     today = date.today().isoformat()
     return [
         {
@@ -220,9 +240,9 @@ def fetch_calendar_events(_: Optional[str]) -> List[dict]:
     ]
 
 
-def get_todays_events(conversation_id: Optional[str]) -> List[dict]:
+def get_todays_events() -> List[dict]:
     """Filter calendar events for the current day."""
-    events = fetch_calendar_events(conversation_id)
+    events = fetch_calendar_events()
     today_str = date.today().isoformat()
     todays_events = [
         event for event in events if event.get("startDate") == today_str
