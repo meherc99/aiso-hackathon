@@ -4,9 +4,9 @@ check_meetings.py
 Utilities for asking an OpenAI-compatible service to analyse parsed Slack
 messages and infer calendar meetings.
 
-The primary entrypoint is `check_for_meetings(messages, client)` which expects:
-- `messages`: list of dictionaries produced by `parse_messages_list`
-- `client`: an `openai.OpenAI` instance (or compatible) already configured
+The primary entrypoint is check_for_meetings(messages, client) which expects:
+- messages: list of dictionaries produced by parse_messages_list
+- client: an openai.OpenAI instance (or compatible) already configured
 
 The function returns a list of augmented meeting JSON objects that can be stored
 directly in the calendar database.
@@ -35,11 +35,11 @@ def check_for_meetings(messages: List[Dict[str, str]], client: OpenAI) -> List[D
     instruction = (
         "We have this conversation in a JSON format. Your task is to determine when a meeting should be scheduled, based on the messages. If multiple meetings are mentioned, you should return multiple json objects that follow the same pattern, but with different parameters, depending on the meetings dates, times and also descriptions."
         "Return multiple JSON objects and nothing else, with the details below. An object must have five keys: "
-        "`date_of_meeting` whose value is the date agreed for the meeting in ISO8601 format YYYY-MM-DD, for example: {\"date_of_meeting\": \"2024-06-10\"}. If no date is mentioned, use the current date in UTC. "
-        "`start_time` whose value is the agreed meeting time in 24-hour HH:MM format in UTC, for example: {\"time\": \"00:00\"}. "
-        "`end_time` whose value is the agreed end time of the meeting. If nothing is agreed, the timestamp returned here should consider a duration of 30 minutes per meeting. The format is also HH:MM in UTC, for example: {\"end_time\": \"00:30\"}. "
-        "`description` whose value is the description of the meeting. This will  be simple text that summerized what the meeting will be about. If nothing is mentioned just leave it blank. It shouldn't be longer than a 20 words." \
-        "`title` whose value is the title of the meeting. This can be derived from the description. It shouldn't be longer than a few words."
+        "date_of_meeting whose value is the date agreed for the meeting in ISO8601 format YYYY-MM-DD, for example: {\"date_of_meeting\": \"2024-06-10\"}. If no date is mentioned, use the current date in UTC. "
+        "start_time whose value is the agreed meeting time in 24-hour HH:MM format in UTC, for example: {\"time\": \"00:00\"}. "
+        "end_time whose value is the agreed end time of the meeting. If nothing is agreed, the timestamp returned here should consider a duration of 30 minutes per meeting. The format is also HH:MM in UTC, for example: {\"end_time\": \"00:30\"}. "
+        "description whose value is the description of the meeting. This will  be simple text that summerized what the meeting will be about. If nothing is mentioned just leave it blank. It shouldn't be longer than a 20 words." \
+        "title whose value is the title of the meeting. This can be derived from the description. It shouldn't be longer than a few words."
         "Do not include any extra text, explanation, or formatting — only the JSON objects."
     )
 
@@ -72,60 +72,75 @@ def check_for_meetings(messages: List[Dict[str, str]], client: OpenAI) -> List[D
         messages=chat_messages,  # Already contains system instruction + user content with filtered data
     )
 
-    # Extract assistant content (only the JSON response)
     try:
         assistant_text = resp.choices[0].message.content
-        # Parse the response directly as a list of JSON objects
-        json_objects = json.loads(assistant_text.strip())
+        print(f"\n[DEBUG] Raw OpenAI response for tasks:\n{assistant_text}\n")
     except Exception as e:
-        # Handle errors and fallback to an empty list
-        print(f"Error processing response: {e}", file=sys.stderr)
-        json_objects = []
-    # Augment each found JSON object with extra fields:
-    # - id: UUID4 string
-    # - category: always "work"
-    # - done: true if current UTC timestamp is after the meeting date+start_time
-    # - created_at: current UTC timestamp in ISO format
+        print(f"Error extracting assistant content: {e}", file=sys.stderr)
+        return []
+
+    # Parse multiple JSON objects (handles JSON array, single object, or line-separated objects)
+    json_objects = []
+    assistant_text = assistant_text.strip()
+    
+    # Try parsing as a single JSON value first (array or object)
+    try:
+        parsed = json.loads(assistant_text)
+        if isinstance(parsed, list):
+            json_objects = parsed
+        elif isinstance(parsed, dict):
+            json_objects = [parsed]
+    except json.JSONDecodeError:
+        # If that fails, try parsing line-by-line (JSON Lines format)
+        for line in assistant_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    json_objects.append(obj)
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse line as JSON: {line[:100]}", file=sys.stderr)
+                continue
+
+    if not json_objects:
+        print(f"No valid JSON objects found in response", file=sys.stderr)
+        return []
+
     now = datetime.now(timezone.utc)
     created_at = now.isoformat()
 
+    augmented = []
     for obj in json_objects:
-        # Ensure we work with a dict
         if not isinstance(obj, dict):
+            print(f"Skipping non-dict task object: {obj}", file=sys.stderr)
             continue
-
-        # Add id and category and created_at
+        
         obj.setdefault('id', str(uuid.uuid4()))
         obj['category'] = 'work'
         obj['created_at'] = created_at
 
-        # Determine if the meeting is done. Expecting keys:
-        # - date_of_meeting: YYYY-MM-DD
-        # - start_time: HH:MM (24-hour, UTC)
-        meeting_completed = False
+        task_completed = False
         try:
             date_str = obj.get('date_of_meeting')
-            time_str = obj.get('start_time') or '00:00'
+            time_str = obj.get('start_time') or '23:59'
             if date_str:
-                # Build a UTC datetime for the meeting
-                meeting_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                # Treat the parsed time as UTC
-                meeting_dt = meeting_dt.replace(tzinfo=timezone.utc)
-                meeting_completed = now > meeting_dt
+                task_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                task_dt = task_dt.replace(tzinfo=timezone.utc)
+                task_completed = now > task_dt
         except Exception:
-            # If parsing fails, leave meeting_completed as False
-            meeting_completed = False
+            task_completed = False
 
-        obj['meeting_completed'] = meeting_completed
+        obj['meeting_completed'] = task_completed
+        augmented.append(obj)
 
-    # Print all found and augmented JSON objects
-    print("\nOpenAI Response - Found {} JSON object(s):".format(len(json_objects)))
-    for i, obj in enumerate(json_objects, 1):
-        print(f"\nJSON Object {i}:")
+    print(f"\nOpenAI Response - Found {len(augmented)} task(s):")
+    for i, obj in enumerate(augmented, 1):
+        print(f"\nTask {i}:")
         print(json.dumps(obj, indent=2, ensure_ascii=False))
 
-    # Return the list of augmented JSON objects
-    return json_objects
+    return augmented
 
 
 def main() -> None:
@@ -181,71 +196,83 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
     if not key:
         raise RuntimeError('No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment.')
 
-    # Use the official openai package if available
-
-
     client = openai.OpenAI(
         api_key=key,
         base_url="https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1"
     )
 
-    # Pass the filtered messages (username + message) correctly structured
     resp = client.chat.completions.create(
         model="gpt-5-nano",
-        messages=chat_messages,  # Already contains system instruction + user content with filtered data
+        messages=chat_messages,
     )
 
-    # Extract assistant content (only the JSON response)
+    # Extract assistant content
     try:
         assistant_text = resp.choices[0].message.content
-        # Parse the response directly as a list of JSON objects
-        json_objects = json.loads(assistant_text.strip())
+        print(f"\n[DEBUG] Raw OpenAI response for tasks:\n{assistant_text}\n")
     except Exception as e:
-        # Handle errors and fallback to an empty list
-        print(f"Error processing response: {e}", file=sys.stderr)
-        json_objects = []
-    # Augment each found JSON object with extra fields:
-    # - id: UUID4 string
-    # - category: always "work"
-    # - done: true if current UTC timestamp is after the meeting date+start_time
-    # - created_at: current UTC timestamp in ISO format
+        print(f"Error extracting assistant content: {e}", file=sys.stderr)
+        return []
+
+    # Parse multiple JSON objects (handles JSON array, single object, or line-separated objects)
+    json_objects = []
+    assistant_text = assistant_text.strip()
+    
+    # Try parsing as a single JSON value first (array or object)
+    try:
+        parsed = json.loads(assistant_text)
+        if isinstance(parsed, list):
+            json_objects = parsed
+        elif isinstance(parsed, dict):
+            json_objects = [parsed]
+    except json.JSONDecodeError:
+        # If that fails, try parsing line-by-line (JSON Lines format)
+        for line in assistant_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    json_objects.append(obj)
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse line as JSON: {line[:100]}", file=sys.stderr)
+                continue
+
+    if not json_objects:
+        print(f"No valid JSON objects found in response", file=sys.stderr)
+        return []
+
     now = datetime.now(timezone.utc)
     created_at = now.isoformat()
 
+    augmented = []
     for obj in json_objects:
-        # Ensure we work with a dict
         if not isinstance(obj, dict):
+            print(f"Skipping non-dict task object: {obj}", file=sys.stderr)
             continue
-
-        # Add id and category and created_at
+        
         obj.setdefault('id', str(uuid.uuid4()))
         obj['category'] = 'tasks'
         obj['created_at'] = created_at
 
-        # Determine if the meeting is done. Expecting keys:
-        # - date_of_meeting: YYYY-MM-DD
-        # - start_time: HH:MM (24-hour, UTC)
-        meeting_completed = False
+        task_completed = False
         try:
             date_str = obj.get('date_of_meeting')
-            time_str = obj.get('start_time') or '00:00'
+            time_str = obj.get('start_time') or '23:59'
             if date_str:
-                # Build a UTC datetime for the meeting
-                meeting_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                # Treat the parsed time as UTC
-                meeting_dt = meeting_dt.replace(tzinfo=timezone.utc)
-                meeting_completed = now > meeting_dt
+                task_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                task_dt = task_dt.replace(tzinfo=timezone.utc)
+                task_completed = now > task_dt
         except Exception:
-            # If parsing fails, leave meeting_completed as False
-            meeting_completed = False
+            task_completed = False
 
-        obj['meeting_completed'] = meeting_completed
+        obj['meeting_completed'] = task_completed
+        augmented.append(obj)
 
-    # Print all found and augmented JSON objects
-    print("\nOpenAI Response - Found {} JSON object(s):".format(len(json_objects)))
-    for i, obj in enumerate(json_objects, 1):
-        print(f"\nJSON Object {i}:")
+    print(f"\nOpenAI Response - Found {len(augmented)} task(s):")
+    for i, obj in enumerate(augmented, 1):
+        print(f"\nTask {i}:")
         print(json.dumps(obj, indent=2, ensure_ascii=False))
 
-    # Return the list of augmented JSON objects
-    return json_objects
+    return augmented

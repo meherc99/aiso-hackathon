@@ -12,6 +12,7 @@ from openai import OpenAI
 from check_meetings import check_for_meetings, check_for_tasks
 from parse_messages import parse_messages_list
 from slack import fetch_all_messages
+from database import get_default_db
 
 
 def _load_env() -> None:
@@ -43,6 +44,9 @@ def _create_openai_client() -> OpenAI:
 def master_agent() -> None:
     """Main agent that orchestrates the workflow."""
     _load_env()
+    
+    # Initialize database
+    db = get_default_db()
 
     try:
         client = _create_openai_client()
@@ -58,7 +62,7 @@ def master_agent() -> None:
         if not messages:
             print(f"Error: No messages fetched from Slack channel {channel_id}.", file=sys.stderr)
             sys.exit(2)
-    except Exception as exc:  # pragma: no cover - network errors
+    except Exception as exc:
         print(f"Error fetching from Slack: {exc}", file=sys.stderr)
         sys.exit(2)
 
@@ -67,126 +71,38 @@ def master_agent() -> None:
         print("No new messages found.")
         return
 
+    # Check for meetings and persist
     print(f"Analyzing {len(parsed_messages)} messages for meetings...")
     try:
-        result = check_for_meetings(parsed_messages, client)
-        print(result)
-    except Exception as exc:  # pragma: no cover - external API
-        print(f"Error calling OpenAI: {exc}", file=sys.stderr)
+        meetings_result = check_for_meetings(parsed_messages, client)
+        if meetings_result:
+            db.add_meetings(meetings_result)
+            print(f"Persisted {len(meetings_result)} meeting(s) to database.")
+        print(meetings_result)
+    except Exception as exc:
+        print(f"Error calling OpenAI for meetings: {exc}", file=sys.stderr)
         sys.exit(3)
     
+    # Check for tasks and persist
     if not mentions:
         print("No mentions found in messages.")
     else:
-        # Inline tasks-check logic (moved from check_for_tasks into agent)
         print(f"Analyzing {len(mentions)} mentioned messages for tasks...")
         try:
-            # Build instruction tailored for tasks
-            instruction = (
-                "We have this conversation in a JSON format. Your task is to detect tasks mentioned or assigned in the messages. "
-                "For each task return a JSON object with these keys: "
-                "\"date_of_meeting\" (task due date YYYY-MM-DD, use current UTC date if not specified), "
-                "\"start_time\" (due time HH:MM 24-hour UTC, use 23:59 if not specified), "
-                "\"end_time\" (use same as start_time if not specified), "
-                "\"description\" (short <=20 words), "
-                "\"title\" (short few-word title). "
-                "Return a JSON array of objects or multiple JSON objects only — no extra text."
-            )
-            user_content = json.dumps(mentions, ensure_ascii=False)
-            chat_messages = [
-                {"role": "system", "content": instruction},
-                {"role": "user", "content": user_content}
-            ]
-
-            resp = client.chat.completions.create(
-                model=os.environ.get("MODEL", "gpt-5"),
-                messages=chat_messages,
-            )
-
-            assistant_text = ""
-            try:
-                assistant_text = resp.choices[0].message.content
-            except Exception as e:
-                print(f"Error extracting assistant content for tasks: {e}", file=sys.stderr)
-
-            # Small robust parser for multiple JSON objects / arrays
-            def _parse_multiple_json_objects(text: str):
-                text = (text or "").strip()
-                if not text:
-                    return []
-                try:
-                    parsed = json.loads(text)
-                    if isinstance(parsed, list):
-                        return parsed
-                    if isinstance(parsed, dict):
-                        return [parsed]
-                except Exception:
-                    pass
-                # JSON lines
-                objs = []
-                for line in text.splitlines():
-                    s = line.strip()
-                    if not s:
-                        continue
-                    try:
-                        o = json.loads(s)
-                        if isinstance(o, dict):
-                            objs.append(o)
-                    except Exception:
-                        continue
-                if objs:
-                    return objs
-                # fallback: extract {...} blocks
-                matches = re.findall(r'\{.*?\}', text, flags=re.DOTALL)
-                out = []
-                for m in matches:
-                    try:
-                        o = json.loads(m)
-                        if isinstance(o, dict):
-                            out.append(o)
-                    except Exception:
-                        continue
-                return out
-
-            json_objects = _parse_multiple_json_objects(assistant_text)
-
-            # Augment each task object
-            now = datetime.now(timezone.utc)
-            created_at = now.isoformat()
-            tasks_result = []
-            for obj in json_objects:
-                if not isinstance(obj, dict):
-                    continue
-                obj.setdefault("id", str(uuid.uuid4()))
-                obj["category"] = "tasks"
-                obj["created_at"] = created_at
-                # compute done based on date_of_meeting + start_time
-                done = False
-                try:
-                    date_str = obj.get("date_of_meeting")
-                    time_str = obj.get("start_time") or "23:59"
-                    if date_str:
-                        dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                        dt = dt.replace(tzinfo=timezone.utc)
-                        done = now > dt
-                except Exception:
-                    done = False
-                obj["done"] = done
-                tasks_result.append(obj)
-
-            print("Mentions found (tasks):")
+            tasks_result = check_for_tasks(mentions, client)
+            if tasks_result:
+                db.add_tasks(tasks_result)
+                print(f"Persisted {len(tasks_result)} task(s) to database.")
+            print("Tasks found:")
             print(json.dumps(tasks_result, indent=2, ensure_ascii=False))
-        except Exception as exc:  # pragma: no cover - external API
+        except Exception as exc:
             print(f"Error calling OpenAI for tasks: {exc}", file=sys.stderr)
             sys.exit(4)
 
-
-    if result:
-        print("Meeting found!")
-        print(result)
+    if meetings_result:
+        print("Meeting(s) found and persisted!")
     else:
         print("No meetings detected.")
-        print(result)
 
 
 if __name__ == "__main__":
