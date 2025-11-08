@@ -44,11 +44,10 @@ def handle_user_message(
     store.append_message(conversation_id, "assistant", bot_reply)
     store.update_title_if_missing(conversation_id, cleaned)
 
-    updated_history = [
-        *history,
-        {"role": "user", "content": cleaned},
-        {"role": "assistant", "content": bot_reply},
-    ]
+    # Reload the full conversation history from storage to ensure consistency
+    messages = store.fetch_messages(conversation_id)
+    updated_history = messages_to_history(messages)
+    
     sidebar_update = conversation_list_update(conversation_id)
     return updated_history, "", conversation_id, sidebar_update
 
@@ -105,8 +104,8 @@ def build_app() -> gr.Blocks:
         conversation_state = gr.State()
 
         with gr.Row(equal_height=True):
-            with gr.Column(scale=1, min_width=240):
-                with gr.Row():
+            with gr.Column(scale=1):
+                with gr.Row(elem_id="conversation-header", height="10px"):
                     gr.Markdown("#### Conversations")
                     new_conversation_btn = gr.Button("New", size="sm")
                 conversation_list = gr.Radio(
@@ -115,23 +114,26 @@ def build_app() -> gr.Blocks:
                     choices=[],
                     value=None,
                     interactive=True,
+                    container=True,
                 )
 
             with gr.Column(scale=4):
                 chatbot = gr.Chatbot(
                     label="Chat",
-                    height=540,
+                    height="80vh",
                     type="messages",
                 )
                 with gr.Row():
+                    
                     message = gr.Textbox(
                         show_label=False,
                         placeholder="Send a message…",
                         autofocus=True,
                         lines=1,
-                        max_lines=4,
+                        max_lines=3,
+                        scale=9,
                     )
-                    send = gr.Button("➤", size="sm")
+                    send = gr.Button("➤", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
 
         demo.load(
             initialize_interface,

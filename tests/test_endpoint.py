@@ -3,7 +3,6 @@
 Test script to verify the custom OpenAI endpoint is working correctly.
 """
 
-import os
 from dotenv import load_dotenv
 from product_search import get_openai_client  # Adjust imports based on actual functions
 
