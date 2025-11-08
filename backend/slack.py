@@ -44,9 +44,24 @@ def fetch_all_messages(channel_id):
 
 # Example usage
 if __name__ == "__main__":
-    channel_id = "C09RKGDKDRT"  # Replace with your channel ID
+    channel_id = "C09S2FM7TND"  # Replace with your channel ID
     messages = fetch_all_messages(channel_id)
-    
-    # Print first few messages
-    for msg in messages[:5]:
-        print(f"{msg.get('user', 'Unknown')}: {msg.get('text', '')}")
+
+    # Send messages to parse_messages which will then send to OpenAI
+    if messages:
+        try:
+            from parse_messages import parse_messages_list
+            import openai_wrapper
+            
+            # Parse the messages
+            parsed_messages = parse_messages_list(messages)
+            print(f"\nParsed {len(parsed_messages)} messages")
+            
+            # Send to OpenAI
+            if parsed_messages:
+                response = openai_wrapper.send_messages_to_openai(parsed_messages)
+                print(f"\nFinal OpenAI Response:\n{response}")
+            else:
+                print("No valid messages to send to OpenAI")
+        except Exception as e:
+            print(f"Error processing messages: {e}")
