@@ -75,10 +75,14 @@ def check_for_meetings(messages: List[Dict[str, str]], client: OpenAI) -> List[D
     # Extract assistant content (only the JSON response)
     try:
         assistant_text = resp.choices[0].message.content
-        # Parse the response directly as a list of JSON objects
-        json_objects = json.loads(assistant_text.strip())
+        parsed = json.loads(assistant_text.strip())
+        if isinstance(parsed, dict):
+            json_objects = [parsed]
+        elif isinstance(parsed, list):
+            json_objects = parsed
+        else:
+            raise TypeError(f"Unexpected JSON payload type: {type(parsed)!r}")
     except Exception as e:
-        # Handle errors and fallback to an empty list
         print(f"Error processing response: {e}", file=sys.stderr)
         json_objects = []
     # Augment each found JSON object with extra fields:
@@ -183,10 +187,14 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
     # Extract assistant content (only the JSON response)
     try:
         assistant_text = resp.choices[0].message.content
-        # Parse the response directly as a list of JSON objects
-        json_objects = json.loads(assistant_text.strip())
+        parsed = json.loads(assistant_text.strip())
+        if isinstance(parsed, dict):
+            json_objects = [parsed]
+        elif isinstance(parsed, list):
+            json_objects = parsed
+        else:
+            raise TypeError(f"Unexpected JSON payload type: {type(parsed)!r}")
     except Exception as e:
-        # Handle errors and fallback to an empty list
         print(f"Error processing response: {e}", file=sys.stderr)
         json_objects = []
     # Augment each found JSON object with extra fields:

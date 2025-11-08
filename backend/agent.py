@@ -8,6 +8,7 @@ from openai import OpenAI
 from check_meetings import check_for_meetings, check_for_tasks
 from parse_messages import parse_messages_list
 from slack import fetch_all_messages
+from calendar_server import calendar_store
 
 
 def _load_env() -> None:
@@ -34,6 +35,52 @@ def _create_openai_client() -> OpenAI:
         "https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1",
     )
     return OpenAI(api_key=key, base_url=base_url)
+
+
+def _sync_meetings_to_calendar(meetings):
+    """Persist newly-detected meetings into the calendar store."""
+    if not meetings:
+        return
+
+    existing_events = calendar_store.list_events()
+    existing_keys = {
+        (
+            event.get("title"),
+            event.get("startDate"),
+            event.get("startTime") or "",
+        )
+        for event in existing_events
+    }
+
+    for meeting in meetings:
+        if not isinstance(meeting, dict):
+            continue
+        start_date = meeting.get("date_of_meeting")
+        if not start_date:
+            continue  # skip malformed entries
+
+        key = (
+            meeting.get("title"),
+            start_date,
+            meeting.get("start_time") or "",
+        )
+        if key in existing_keys:
+            continue
+
+        calendar_store.create_event(
+            {
+                "id": meeting.get("id"),
+                "title": meeting.get("title", "Meeting"),
+                "description": meeting.get("description") or "",
+                "startDate": start_date,
+                "endDate": start_date,
+                "startTime": meeting.get("start_time") or "",
+                "endTime": meeting.get("end_time") or "",
+                "category": meeting.get("category") or "work",
+                "done": meeting.get("meeting_completed", False),
+            }
+        )
+        existing_keys.add(key)
 
 
 def master_agent() -> None:
@@ -67,6 +114,7 @@ def master_agent() -> None:
     try:
         result = check_for_meetings(parsed_messages, client)
         print(result)
+        _sync_meetings_to_calendar(result)
     except Exception as exc:  # pragma: no cover - external API
         print(f"Error calling OpenAI: {exc}", file=sys.stderr)
         sys.exit(3)

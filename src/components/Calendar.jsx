@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react'
-import { getCategoryById } from '../store/events'
 
 //Month grid where events are displayed
 function getMonthGrid(year, month) {
@@ -17,7 +16,7 @@ function getMonthGrid(year, month) {
   return { days, monthName: first.toLocaleString(undefined, { month: 'long' }), year }
 }
 
-export default function Calendar({ events = [], filterCategory, onFilterChange, categories = [], onEdit, onDelete, onToggleDone, onViewEvent }) {
+export default function Calendar({ events = [], filterCategory, onFilterChange, categories = [], categoryMap = {}, onEdit, onDelete, onToggleDone, onViewEvent }) {
   const today = new Date()
   const [selectedYear, setSelectedYear] = useState(today.getFullYear())
   const [selectedMonth, setSelectedMonth] = useState(today.getMonth())
@@ -119,7 +118,7 @@ export default function Calendar({ events = [], filterCategory, onFilterChange, 
                 {d && <div className="day-num">{d.getDate()}</div>}
                 <div className="day-events">
                 {dayEvents.map(ev => {
-                  const category = getCategoryById(ev.category)
+                  const category = ev?.category ? categoryMap[ev.category] : null
                   let timeDisplay = ''
                   if (ev.startTime) {
                     timeDisplay = ev.startTime.substring(0, 5)
