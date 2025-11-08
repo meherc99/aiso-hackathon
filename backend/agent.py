@@ -1,96 +1,97 @@
 import os
 import sys
-from openai import OpenAI
-from slack import fetch_all_messages
-from check_meetings import check_for_meetings
-from parse_messages import parse_messages_list 
+from pathlib import Path
+
 from dotenv import load_dotenv
-load_dotenv()
+from openai import OpenAI
+
+from check_meetings import check_for_meetings, check_for_tasks
+from parse_messages import parse_messages_list
+from slack import fetch_all_messages
 
 
+def _load_env() -> None:
+    """Ensure the project-level .env file is loaded regardless of cwd."""
+    project_root = Path(__file__).resolve().parent.parent
+    env_path = project_root / ".env"
+    # Only attempt to load if the file exists; this keeps CI runs happy.
+    if env_path.exists():
+        load_dotenv(dotenv_path=env_path, override=False)
+    else:
+        load_dotenv(override=False)
 
-"""Create and return an OpenAI client configured for the custom endpoint."""
 
-key = os.environ.get('OPENAI_API_KEY') or os.environ.get('API_KEY')
+def _create_openai_client() -> OpenAI:
+    """Create and return an OpenAI client configured for the custom endpoint."""
+    key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+    if not key:
+        raise RuntimeError(
+            "No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment."
+        )
 
-# Resolve API key from param or environment (only needed for real requests)
-if not key:
-    raise RuntimeError('No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment.')
-client = OpenAI(
+    base_url = os.getenv(
+        "OPENAI_BASE_URL",
+        "https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1",
+    )
+    return OpenAI(api_key=key, base_url=base_url)
 
-    api_key=key,
-    base_url=os.environ.get('OPENAI_BASE_URL')
-)
-    
 
-    # response = openai_client.chat.completions.create(
-    #     model="gpt-4",
-    #     messages=[
-    #         {
-    #             "role": "system",
-    #             "content": "You are an assistant that extracts meeting information from Slack messages. Identify any meetings mentioned, including date, time, and participants."
-    #         },
-    #         {
-    #             "role": "user",
-    #             "content": f"Analyze these Slack messages and extract any meeting information:\n\n{messages_text}"
-    #         }
-    #     ],
-    #     functions=[
-    #         {
-    #             "name": "extract_meeting",
-    #             "description": "Extract meeting details from messages",
-    #             "parameters": {
-    #                 "type": "object",
-    #                 "properties": {
-    #                     "meeting_title": {"type": "string"},
-    #                     "date": {"type": "string"},
-    #                     "time": {"type": "string"},
-    #                     "participants": {
-    #                         "type": "array",
-    #                         "items": {"type": "string"}
-    #                     },
-    #                     "location": {"type": "string"}
-    #                 },
-    #                 "required": ["meeting_title"]
-    #             }
-    #         }
-    #     ],
-    #     function_call="auto"
-    # )
-
-def master_agent():
+def master_agent() -> None:
     """Main agent that orchestrates the workflow."""
+    _load_env()
 
-    channel_id = "C09RKGDKDRT"  # Replace with your channel ID
-    
-    print("Fetching Slack messages...")
     try:
-        print(f'Fetching messages from Slack channel {channel_id}...', file=sys.stderr)
-        messages = fetch_all_messages(channel_id)
-        if not messages:
-            print(f'Error: No messages fetched from Slack channel {channel_id}.', file=sys.stderr)
-            sys.exit(2)
-    except Exception as e:
-        print(f'Error fetching from Slack: {e}', file=sys.stderr)
+        client = _create_openai_client()
+    except RuntimeError as exc:
+        print(exc, file=sys.stderr)
         sys.exit(2)
 
-    
-    parsed_messages = parse_messages_list(messages)
-    
+    channel_id = os.getenv("SLACK_CHANNEL_ID", "C09RKGDKDRT")
+    print("Fetching Slack messages...")
+    try:
+        print(f"Fetching messages from Slack channel {channel_id}...", file=sys.stderr)
+        messages = fetch_all_messages(channel_id)
+        if not messages:
+            print(f"Error: No messages fetched from Slack channel {channel_id}.", file=sys.stderr)
+            sys.exit(2)
+    except Exception as exc:  # pragma: no cover - network errors
+        print(f"Error fetching from Slack: {exc}", file=sys.stderr)
+        sys.exit(2)
+
+    parsed_messages, mentions = parse_messages_list(messages)
     if not parsed_messages:
         print("No new messages found.")
         return
 
     print(f"Analyzing {len(parsed_messages)} messages for meetings...")
-    result = check_for_meetings(parsed_messages, client)
+    try:
+        result = check_for_meetings(parsed_messages, client)
+        print(result)
+    except Exception as exc:  # pragma: no cover - external API
+        print(f"Error calling OpenAI: {exc}", file=sys.stderr)
+        sys.exit(3)
+    
+    if not mentions:
+        print("No mentions found in messages.")
 
-    # Check if function was called
+    else:
+        print(f"Analyzing {len(mentions)} mentioned messages for tasks...")
+        try:
+            tasks_result = check_for_tasks(mentions, client)
+            print("Mentions found:")
+            print(tasks_result)
+        except Exception as exc:  # pragma: no cover - external API
+            print(f"Error calling OpenAI for tasks: {exc}", file=sys.stderr)
+            sys.exit(4)
+
+
     if result:
         print("Meeting found!")
         print(result)
     else:
         print("No meetings detected.")
         print(result)
+
 
 if __name__ == "__main__":
     master_agent()

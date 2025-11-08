@@ -15,7 +15,8 @@ Notes / assumptions:
 - Only keys present (after normalization) will be included for each item.
 """
 import json
-from typing import Any, Dict, List, Union
+import re
+from typing import Any, Dict, List, Union, Tuple
 
 # Import Slack message fetcher
 try:
@@ -37,16 +38,7 @@ INCOMING_KEYS = {
 
 def parse_message(raw: Union[str, Dict[str, Any]]) -> Union[Dict[str, Any], None]:
     """Parse a single raw message (string or dict) and return a dict
-    with exactly these keys: send_time, message, username.
-
-    Rules / assumptions:
-    - Input items are dict-like with keys 'user', 'type', 'text', 'ts'.
-    - Only include items where obj.get('type') == 'message' AND the item does not
-      have a 'subtype' key (this excludes events like channel_join). This matches the
-      requirement "filter the messages by type so that only message types are included".
-      If you'd rather include items with 'subtype' present, we can change this.
-    - Timestamps in 'ts' are strings like '1762611979.560459' and will be sorted
-      numerically.
+    with keys: send_time, message, username.
     """
     obj = None
     if isinstance(raw, str):
@@ -63,7 +55,6 @@ def parse_message(raw: Union[str, Dict[str, Any]]) -> Union[Dict[str, Any], None
     if obj.get('type') != 'message':
         return None
     if 'subtype' in obj:
-        # exclude join/other subtype events; change this logic if you want to keep them
         return None
 
     out: Dict[str, Any] = {}
@@ -72,16 +63,17 @@ def parse_message(raw: Union[str, Dict[str, Any]]) -> Union[Dict[str, Any], None
         if in_key in obj:
             out[out_key] = obj[in_key]
 
-    # If no target keys found, skip
     if not out:
         return None
     return out
 
 
-def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> List[Dict[str, Any]]:
-    """Parse a list of messages, filter and normalize them, and sort by timestamp.
+def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
+    """Parse a list of messages, normalize and sort them.
 
-    Returns a list of dicts with keys send_time, message, username sorted by send_time (ascending).
+    Returns a tuple: (final_list, mentioned_list)
+      - final_list: list of dicts with keys 'username', 'message', and optional 'send_time'
+      - mentioned_list: subset of final_list where the message contains a Slack mention (<@USERID>)
     """
     parsed: List[Dict[str, Any]] = []
     for raw in messages:
@@ -89,20 +81,18 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> List[Dict
         if p is not None:
             parsed.append(p)
 
-    # Sort by numeric timestamp (ts is a string like '1762611979.560459')
+    # Sort by numeric timestamp (send_time is a string like '1762611979.560459')
     try:
         parsed.sort(key=lambda x: float(x.get('send_time', 0)))
     except Exception:
-        # If conversion fails for any item, leave current order
         pass
 
-    # Final output should only include username and message (timestamps were used only for sorting)
+    # Build final list (only username, message, and keep send_time for reference)
     final: List[Dict[str, Any]] = []
     for item in parsed:
         username = item.get('username')
         message = item.get('message')
-        currTimestamp = item.get('ts')
-        # Include only if message and username exist; otherwise include whatever is present
+        currTimestamp = item.get('send_time')
         entry: Dict[str, Any] = {}
         if username is not None:
             entry['username'] = username
@@ -113,34 +103,13 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> List[Dict
         if entry:
             final.append(entry)
 
-    return final
+    # Detect mentions (Slack format: <@USERID>) and collect those entries
+    mention_pattern = re.compile(r'<@[^>\s]+>')
+    task_pattern = re.compile(r'\btask(s)?\b', re.IGNORECASE)
+    mentioned: List[Dict[str, Any]] = []
+    for entry in final:
+        msg = entry.get('message', '')
+        if msg and mention_pattern.search(msg) and task_pattern.search(msg):
+            mentioned.append(entry.copy())
 
-
-def main() -> None:
-    """
-    CLI helper: reads Slack-like messages from a JSON file (or Slack if no file provided)
-    and prints the normalized list.
-    """
-    import argparse
-
-    parser = argparse.ArgumentParser(description="Parse Slack messages into normalized records.")
-    parser.add_argument("source", nargs="?", help="Optional path to JSON messages.")
-    args = parser.parse_args()
-
-    data: List[Dict[str, Any]]
-    if args.source:
-        with open(args.source, "r", encoding="utf-8") as handle:
-            data = json.load(handle)
-    else:
-        if fetch_all_messages is None:
-            print("No input file provided and Slack helper unavailable.", file=sys.stderr)
-            return
-        channel_id = os.getenv("SLACK_CHANNEL_ID", "C09S2FM7TND")
-        data = fetch_all_messages(channel_id)
-
-    parsed = parse_messages_list(data)
-    print(json.dumps(parsed, indent=2, ensure_ascii=False))
-
-
-if __name__ == "__main__":
-    main()
+    return final, mentioned
