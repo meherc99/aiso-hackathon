@@ -32,7 +32,9 @@ import sys
 from datetime import datetime, timezone
 import uuid
 from dotenv import load_dotenv
+
 load_dotenv()
+
 
 def check_for_meetings(messages: List[Dict[str, str]], client):
     """Send conversations to OpenAI and return the assistant reply as a string.
@@ -120,3 +122,32 @@ def check_for_meetings(messages: List[Dict[str, str]], client):
 
     # Return the list of augmented JSON objects
     return json_objects
+
+
+def main() -> None:
+    """
+    Minimal CLI usage:
+      python backend/check_meetings.py messages.json
+    Requires OPENAI credentials configured.
+    """
+    import argparse
+    from openai import OpenAI
+
+    parser = argparse.ArgumentParser(description="Inspect parsed Slack messages for meetings.")
+    parser.add_argument("source", help="Path to JSON file containing parsed messages.")
+    args = parser.parse_args()
+
+    with open(args.source, "r", encoding="utf-8") as handle:
+        parsed_messages = json.load(handle)
+
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY / API_KEY is required.")
+
+    client = OpenAI(api_key=api_key, base_url=os.getenv("OPENAI_BASE_URL"))
+    result = check_for_meetings(parsed_messages, client)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

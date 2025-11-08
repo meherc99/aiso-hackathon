@@ -40,3 +40,45 @@ def fetch_all_messages(channel_id):
     except SlackApiError as e:
         print(f"Error fetching messages: {e.response['error']}")
         return []
+
+
+if __name__ == "__main__":
+    """
+    Quick manual test harness.
+    Ensure SLACK_BOT_TOKEN (and optionally SLACK_CHANNEL_ID) plus OPENAI credentials are set.
+    """
+    channel_id = os.getenv("SLACK_CHANNEL_ID", "C09S2FM7TND")  # Replace with your channel ID
+    print(f"Fetching messages from Slack channel {channel_id}...")
+    messages = fetch_all_messages(channel_id)
+
+    if not messages:
+        print("No messages fetched; aborting.")
+        raise SystemExit(1)
+
+    try:
+        from parse_messages import parse_messages_list
+        from check_meetings import check_for_meetings
+        from openai import OpenAI
+
+        parsed_messages = parse_messages_list(messages)
+        print(f"\nParsed {len(parsed_messages)} messages")
+
+        if not parsed_messages:
+            print("No valid messages to send to OpenAI")
+            raise SystemExit(0)
+
+        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+        if not api_key:
+            raise RuntimeError("OPENAI_API_KEY / API_KEY is not set.")
+
+        client = OpenAI(api_key=api_key, base_url=os.getenv("OPENAI_BASE_URL"))
+        json_responses = check_for_meetings(parsed_messages, client)
+
+        print(f"\n=== Final Summary ===")
+        print(f"Total JSON responses: {len(json_responses)}")
+        for i, json_obj in enumerate(json_responses, 1):
+            print(f"\nMeeting {i}:")
+            for key, value in json_obj.items():
+                print(f"  {key}: {value}")
+    except Exception as exc:
+        print(f"Error processing messages: {exc}")
