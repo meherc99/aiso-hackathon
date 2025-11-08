@@ -68,7 +68,13 @@ export default function App() {
     <div className="app">
       <main className="app-main">
         <aside className="sidebar">
-          <EventForm onCreate={handleCreate} onUpdate={handleUpdate} editing={editing} onCancel={() => setEditing(null)} />
+          <EventForm
+            events={events}
+            onCreate={handleCreate}
+            onUpdate={handleUpdate}
+            editing={editing}
+            onCancel={() => setEditing(null)}
+          />
           <EventList 
             events={events} 
             onEdit={setEditing} 

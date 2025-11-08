@@ -24,10 +24,10 @@ Start the calendar server:
 python backend/calendar_server.py
 ```
 
-The server will start on `http://localhost:5000` by default.
+The server will start on `http://localhost:5050` by default.
 
 ### Environment Variables
-- `CALENDAR_PORT`: Port number (default: 5000)
+- `CALENDAR_PORT`: Port number (default: 5050)
 - `FLASK_DEBUG`: Enable debug mode (default: false)
 
 Example:
@@ -102,13 +102,13 @@ python tests/test_calendar_api.py
 Or test manually with curl:
 ```bash
 # Health check
-curl http://localhost:5000/api/health
+curl http://localhost:5050/api/health
 
 # Get all events
-curl http://localhost:5000/api/events
+curl http://localhost:5050/api/events
 
 # Create event
-curl -X POST http://localhost:5000/api/events \
+curl -X POST http://localhost:5050/api/events \
   -H "Content-Type: application/json" \
   -d "{\"title\":\"Test Event\",\"startDate\":\"2025-11-08\",\"endDate\":\"2025-11-08\"}"
 ```
@@ -130,7 +130,7 @@ cd ..
 python backend/calendar_server.py
 ```
 
-3. Access the React app at: `http://localhost:5000/`
+3. Access the React app at: `http://localhost:5050/`
 
 ## Database
 

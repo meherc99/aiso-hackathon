@@ -6,9 +6,10 @@ AI-powered calendar assistant with integrated chatbot and calendar management.
 
 ### Backend
 - **`calendar_server.py`** — REST API server for calendar events with SQLite storage
-- **`parse_messages.py`** — Slack message parser and OpenAI integration
-- **`openai_wrapper.py`** — OpenAI Chat API wrapper
+- **`parse_messages.py`** — Slack message parser that normalises content
+- **`check_meetings.py`** — OpenAI helper that extracts meeting details from messages
 - **`slack.py`** — Slack integration utilities
+- **`agent.py`** — Orchestrates Slack fetching and meeting detection
 
 ### Frontend
 - **`chatbot.py`** — Gradio-based chat interface with conversation management
@@ -49,7 +50,7 @@ Or on PowerShell:
 .\start_servers.ps1
 ```
 This starts:
-- Calendar API server on `http://localhost:5000`
+- Calendar API server on `http://localhost:5050`
 - Chatbot UI with embedded calendar on `http://localhost:7860`
 
 **Features:**
@@ -78,7 +79,7 @@ npm run build
 cd ..
 ```
 
-2. The built app will be served by the calendar server at `http://localhost:5000/`
+2. The built app will be served by the calendar server at `http://localhost:5050/`
 
 ## API Usage
 
@@ -86,16 +87,16 @@ cd ..
 
 ```powershell
 # Get all events
-curl http://localhost:5000/api/events
+curl http://localhost:5050/api/events
 
 # Create an event
-curl -X POST http://localhost:5000/api/events -H "Content-Type: application/json" -d "{\"title\":\"Meeting\",\"startDate\":\"2025-11-08\",\"endDate\":\"2025-11-08\",\"startTime\":\"14:00\",\"endTime\":\"15:00\"}"
+curl -X POST http://localhost:5050/api/events -H "Content-Type: application/json" -d "{\"title\":\"Meeting\",\"startDate\":\"2025-11-08\",\"endDate\":\"2025-11-08\",\"startTime\":\"14:00\",\"endTime\":\"15:00\"}"
 
 # Update an event
-curl -X PUT http://localhost:5000/api/events/{event_id} -H "Content-Type: application/json" -d "{\"title\":\"Updated Meeting\"}"
+curl -X PUT http://localhost:5050/api/events/{event_id} -H "Content-Type: application/json" -d "{\"title\":\"Updated Meeting\"}"
 
 # Delete an event
-curl -X DELETE http://localhost:5000/api/events/{event_id}
+curl -X DELETE http://localhost:5050/api/events/{event_id}
 ```
 
 For detailed API documentation, see [`backend/CALENDAR_SERVER.md`](backend/CALENDAR_SERVER.md)

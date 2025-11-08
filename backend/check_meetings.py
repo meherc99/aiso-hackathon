@@ -1,39 +1,27 @@
 """
-openai_wrapper.py
+check_meetings.py
 
-Small wrapper around the OpenAI Chat API to send a list of messages (username/message)
-and return the assistant reply as a string.
+Utilities for asking an OpenAI-compatible service to analyse parsed Slack
+messages and infer calendar meetings.
 
-Security: this module does NOT hardcode any API key. It reads the key from the
-environment variable `OPENAI_API_KEY` or `API_KEY`. Do NOT paste real keys into files.
+The primary entrypoint is `check_for_meetings(messages, client)` which expects:
+- `messages`: list of dictionaries produced by `parse_messages_list`
+- `client`: an `openai.OpenAI` instance (or compatible) already configured
 
-Usage examples:
-  # Dry run (no network call)
-  python openai_wrapper.py --dry-run
-
-  # Real call (make sure OPENAI_API_KEY is set in env)
-  python openai_wrapper.py --model gpt-3.5-turbo --input messages.json
-
-API contract:
-  send_messages_to_openai(messages, model='gpt-3.5-turbo', api_key=None, dry_run=False) -> str
-
-Where `messages` is a list of objects with keys `username` and `message`.
-The wrapper will construct a prompt:
-  "We have these conversation in a JSON Format. Your task is to determine between which times should a meeting be schedule. Please only return the timestamps without any additional text."
-and send the JSON-formatted messages as the user content.
-
-The function returns the assistant's raw reply string (no parsing).
+The function returns a list of augmented meeting JSON objects that can be stored
+directly in the calendar database.
 """
 
 from typing import List, Dict, Any
 import os
 import json
-import os
 import sys
 from datetime import datetime, timezone
 import uuid
 from dotenv import load_dotenv
+
 load_dotenv()
+
 
 def check_for_meetings(messages: List[Dict[str, str]], client):
     """Send conversations to OpenAI and return the assistant reply as a string.
@@ -121,3 +109,32 @@ def check_for_meetings(messages: List[Dict[str, str]], client):
 
     # Return the list of augmented JSON objects
     return json_objects
+
+
+def main() -> None:
+    """
+    Minimal CLI usage:
+      python backend/check_meetings.py messages.json
+    Requires OPENAI credentials configured.
+    """
+    import argparse
+    from openai import OpenAI
+
+    parser = argparse.ArgumentParser(description="Inspect parsed Slack messages for meetings.")
+    parser.add_argument("source", help="Path to JSON file containing parsed messages.")
+    args = parser.parse_args()
+
+    with open(args.source, "r", encoding="utf-8") as handle:
+        parsed_messages = json.load(handle)
+
+    api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
+    if not api_key:
+        raise RuntimeError("OPENAI_API_KEY / API_KEY is required.")
+
+    client = OpenAI(api_key=api_key, base_url=os.getenv("OPENAI_BASE_URL"))
+    result = check_for_meetings(parsed_messages, client)
+    print(json.dumps(result, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()

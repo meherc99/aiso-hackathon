@@ -114,3 +114,33 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> List[Dict
             final.append(entry)
 
     return final
+
+
+def main() -> None:
+    """
+    CLI helper: reads Slack-like messages from a JSON file (or Slack if no file provided)
+    and prints the normalized list.
+    """
+    import argparse
+
+    parser = argparse.ArgumentParser(description="Parse Slack messages into normalized records.")
+    parser.add_argument("source", nargs="?", help="Optional path to JSON messages.")
+    args = parser.parse_args()
+
+    data: List[Dict[str, Any]]
+    if args.source:
+        with open(args.source, "r", encoding="utf-8") as handle:
+            data = json.load(handle)
+    else:
+        if fetch_all_messages is None:
+            print("No input file provided and Slack helper unavailable.", file=sys.stderr)
+            return
+        channel_id = os.getenv("SLACK_CHANNEL_ID", "C09S2FM7TND")
+        data = fetch_all_messages(channel_id)
+
+    parsed = parse_messages_list(data)
+    print(json.dumps(parsed, indent=2, ensure_ascii=False))
+
+
+if __name__ == "__main__":
+    main()
