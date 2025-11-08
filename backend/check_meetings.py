@@ -156,8 +156,8 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
     """Send conversations to OpenAI and return the assistant reply as a list of JSON objects (tasks).
     The returned objects follow the same schema as meetings, but will be categorized as 'tasks'."""
     instruction = (
-        "We have this conversation in a JSON format. Your task is to determine tasks that are mentioned or assigned in the messages. "
-        "For each task you find, return a JSON object (or multiple objects). Each object must have five keys: "
+        "We have these tasks in a JSON format, one task per entry. You can ignore the username parameter. Your job is to determine the tasks that are mentioned or assigned in the messages. There should be one Json object returned per each of the JSON objects sent to you."
+        "Each of these returned JSON objects must have five keys: "
         "`date_of_meeting` (use this field to represent the task due date in ISO8601 YYYY-MM-DD), this should be the date the task is due. If no date is mentioned, use the current date in UTC. "
         "`start_time` (use this for the due time in 24-hour HH:MM UTC), this should be the time the task is due. If no time is mentioned, use 23:59. "
         "`end_time`  this should be equal to start_time you computed earlier, "
@@ -166,18 +166,33 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
         "Return multiple JSON objects if multiple tasks are present. Do not include any additional text or explanation — only the JSON objects."
     )
 
-    messages = json.dumps(messages, ensure_ascii=False)
+    model: str = 'gpt-5'
+    model = os.environ.get('MODEL', 'gpt-5')
+
+    user_content = json.dumps(messages, ensure_ascii=False)
 
     chat_messages = [
         {"role": "system", "content": instruction},
-        {"role": "user", "content": messages}
+        {"role": "user", "content": user_content}
     ]
-    
+
+    # Resolve API key from param or environment
+    key = os.environ.get('OPENAI_API_KEY') or os.environ.get('API_KEY')
+    if not key:
+        raise RuntimeError('No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment.')
+
+    # Use the official openai package if available
+
+
+    client = openai.OpenAI(
+        api_key=key,
+        base_url="https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1"
+    )
+
     # Pass the filtered messages (username + message) correctly structured
     resp = client.chat.completions.create(
-        model=os.environ.get('MODEL', 'gpt-5'),
+        model="gpt-5-nano",
         messages=chat_messages,  # Already contains system instruction + user content with filtered data
-        response_format={"type": "json_object"},
     )
 
     # Extract assistant content (only the JSON response)

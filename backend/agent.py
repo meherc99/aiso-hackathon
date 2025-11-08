@@ -1,6 +1,10 @@
 import os
 import sys
 from pathlib import Path
+import json
+import re
+import uuid
+from datetime import datetime, timezone
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -73,13 +77,105 @@ def master_agent() -> None:
     
     if not mentions:
         print("No mentions found in messages.")
-
     else:
+        # Inline tasks-check logic (moved from check_for_tasks into agent)
         print(f"Analyzing {len(mentions)} mentioned messages for tasks...")
         try:
-            tasks_result = check_for_tasks(mentions, client)
-            print("Mentions found:")
-            print(tasks_result)
+            # Build instruction tailored for tasks
+            instruction = (
+                "We have this conversation in a JSON format. Your task is to detect tasks mentioned or assigned in the messages. "
+                "For each task return a JSON object with these keys: "
+                "\"date_of_meeting\" (task due date YYYY-MM-DD, use current UTC date if not specified), "
+                "\"start_time\" (due time HH:MM 24-hour UTC, use 23:59 if not specified), "
+                "\"end_time\" (use same as start_time if not specified), "
+                "\"description\" (short <=20 words), "
+                "\"title\" (short few-word title). "
+                "Return a JSON array of objects or multiple JSON objects only — no extra text."
+            )
+            user_content = json.dumps(mentions, ensure_ascii=False)
+            chat_messages = [
+                {"role": "system", "content": instruction},
+                {"role": "user", "content": user_content}
+            ]
+
+            resp = client.chat.completions.create(
+                model=os.environ.get("MODEL", "gpt-5"),
+                messages=chat_messages,
+            )
+
+            assistant_text = ""
+            try:
+                assistant_text = resp.choices[0].message.content
+            except Exception as e:
+                print(f"Error extracting assistant content for tasks: {e}", file=sys.stderr)
+
+            # Small robust parser for multiple JSON objects / arrays
+            def _parse_multiple_json_objects(text: str):
+                text = (text or "").strip()
+                if not text:
+                    return []
+                try:
+                    parsed = json.loads(text)
+                    if isinstance(parsed, list):
+                        return parsed
+                    if isinstance(parsed, dict):
+                        return [parsed]
+                except Exception:
+                    pass
+                # JSON lines
+                objs = []
+                for line in text.splitlines():
+                    s = line.strip()
+                    if not s:
+                        continue
+                    try:
+                        o = json.loads(s)
+                        if isinstance(o, dict):
+                            objs.append(o)
+                    except Exception:
+                        continue
+                if objs:
+                    return objs
+                # fallback: extract {...} blocks
+                matches = re.findall(r'\{.*?\}', text, flags=re.DOTALL)
+                out = []
+                for m in matches:
+                    try:
+                        o = json.loads(m)
+                        if isinstance(o, dict):
+                            out.append(o)
+                    except Exception:
+                        continue
+                return out
+
+            json_objects = _parse_multiple_json_objects(assistant_text)
+
+            # Augment each task object
+            now = datetime.now(timezone.utc)
+            created_at = now.isoformat()
+            tasks_result = []
+            for obj in json_objects:
+                if not isinstance(obj, dict):
+                    continue
+                obj.setdefault("id", str(uuid.uuid4()))
+                obj["category"] = "tasks"
+                obj["created_at"] = created_at
+                # compute done based on date_of_meeting + start_time
+                done = False
+                try:
+                    date_str = obj.get("date_of_meeting")
+                    time_str = obj.get("start_time") or "23:59"
+                    if date_str:
+                        dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                        dt = dt.replace(tzinfo=timezone.utc)
+                        done = now > dt
+                except Exception:
+                    done = False
+                obj["done"] = done
+                tasks_result.append(obj)
+
+            print("Mentions found (tasks):")
+            print(json.dumps(tasks_result, indent=2, ensure_ascii=False))
         except Exception as exc:  # pragma: no cover - external API
             print(f"Error calling OpenAI for tasks: {exc}", file=sys.stderr)
             sys.exit(4)
