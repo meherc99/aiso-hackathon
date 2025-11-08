@@ -1,0 +1,25 @@
+{
+  "name": "calendar-app",
+  "version": "1.0.0",
+  "private": true,
+  "description": "Simple calendar app (React + Vite)",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "start": "vite",
+    "build": "vite build",
+    "preview": "vite preview",
+    "test": "echo \"No tests configured\" && exit 0"
+  },
+  "dependencies": {
+    "react": "^18.2.0",
+    "react-dom": "^18.2.0",
+    "uuid": "^13.0.0"
+  },
+  "devDependencies": {
+    "@vitejs/plugin-react": "^4.0.0",
+    "vite": "^5.0.0"
+  },
+  "author": "",
+  "license": "MIT"
+}
