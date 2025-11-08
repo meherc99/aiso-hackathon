@@ -1,28 +1,15 @@
 """
-openai_wrapper.py
+check_meetings.py
 
-Small wrapper around the OpenAI Chat API to send a list of messages (username/message)
-and return the assistant reply as a string.
+Utilities for asking an OpenAI-compatible service to analyse parsed Slack
+messages and infer calendar meetings.
 
-Security: this module does NOT hardcode any API key. It reads the key from the
-environment variable `OPENAI_API_KEY` or `API_KEY`. Do NOT paste real keys into files.
+The primary entrypoint is `check_for_meetings(messages, client)` which expects:
+- `messages`: list of dictionaries produced by `parse_messages_list`
+- `client`: an `openai.OpenAI` instance (or compatible) already configured
 
-Usage examples:
-  # Dry run (no network call)
-  python openai_wrapper.py --dry-run
-
-  # Real call (make sure OPENAI_API_KEY is set in env)
-  python openai_wrapper.py --model gpt-3.5-turbo --input messages.json
-
-API contract:
-  send_messages_to_openai(messages, model='gpt-3.5-turbo', api_key=None, dry_run=False) -> str
-
-Where `messages` is a list of objects with keys `username` and `message`.
-The wrapper will construct a prompt:
-  "We have these conversation in a JSON Format. Your task is to determine between which times should a meeting be schedule. Please only return the timestamps without any additional text."
-and send the JSON-formatted messages as the user content.
-
-The function returns the assistant's raw reply string (no parsing).
+The function returns a list of augmented meeting JSON objects that can be stored
+directly in the calendar database.
 """
 
 from typing import List, Dict, Any

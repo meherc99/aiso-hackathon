@@ -6,9 +6,10 @@ AI-powered calendar assistant with integrated chatbot and calendar management.
 
 ### Backend
 - **`calendar_server.py`** — REST API server for calendar events with SQLite storage
-- **`parse_messages.py`** — Slack message parser and OpenAI integration
-- **`openai_wrapper.py`** — OpenAI Chat API wrapper
+- **`parse_messages.py`** — Slack message parser that normalises content
+- **`check_meetings.py`** — OpenAI helper that extracts meeting details from messages
 - **`slack.py`** — Slack integration utilities
+- **`agent.py`** — Orchestrates Slack fetching and meeting detection
 
 ### Frontend
 - **`chatbot.py`** — Gradio-based chat interface with conversation management
