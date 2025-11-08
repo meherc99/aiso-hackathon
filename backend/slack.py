@@ -59,8 +59,13 @@ if __name__ == "__main__":
             
             # Send to OpenAI
             if parsed_messages:
-                response = openai_wrapper.send_messages_to_openai(parsed_messages)
-                print(f"\nFinal OpenAI Response:\n{response}")
+                json_responses = openai_wrapper.send_messages_to_openai(parsed_messages)
+                print(f"\n=== Final Summary ===")
+                print(f"Total JSON responses: {len(json_responses)}")
+                for i, json_obj in enumerate(json_responses, 1):
+                    print(f"\nMeeting {i}:")
+                    for key, value in json_obj.items():
+                        print(f"  {key}: {value}")
             else:
                 print("No valid messages to send to OpenAI")
         except Exception as e:
