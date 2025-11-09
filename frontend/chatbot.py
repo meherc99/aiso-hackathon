@@ -1,6 +1,7 @@
 import html
 import logging
 import os
+import sys
 import subprocess
 import threading
 from typing import Any, List, Optional, Tuple
@@ -292,7 +293,7 @@ def run_agent_background(conversation_id: Optional[str]) -> Tuple[str, str]:
         
         # Run the agent script synchronously
         result = subprocess.run(
-            ["python", agent_path],
+            [sys.executable, agent_path],
             cwd=project_root,
             capture_output=True,
             text=True,

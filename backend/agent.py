@@ -117,11 +117,18 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
         if parsed_messages:
             print(f"Analyzing {len(parsed_messages)} messages for meetings...")
             try:
-                meetings_result = check_for_meetings(parsed_messages, client)
+                try:
+                    meetings_result = check_for_meetings(parsed_messages, client)
+                except Exception as exc:
+                    print(f"ERROR: Exception during meeting check: {exc}", file=sys.stderr)
+                    meetings_result = []
                 if meetings_result:
-                    db.add_meetings(meetings_result)
-                    result['meetings_count'] = len(meetings_result)
-                    print(f"Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
+                    try:
+                        db.add_meetings(meetings_result)
+                        result['meetings_count'] = len(meetings_result)
+                        print(f"Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
+                    except Exception as exc:
+                        print(f"WARNING: Error adding meetings to database for channel {channel_id}: {exc}", file=sys.stderr)
             except Exception as exc:
                 print(f"WARNING: Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
         
