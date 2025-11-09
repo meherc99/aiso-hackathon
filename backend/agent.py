@@ -138,6 +138,10 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
             try:
                 tasks_result = check_for_tasks(mentions, client)
                 if tasks_result:
+                    # Add channel_id to tasks as well
+                    for task in tasks_result:
+                        task['channel_id'] = channel_id
+                    
                     db.add_tasks(tasks_result)
                     result['tasks_count'] = len(tasks_result)
                     print(f"Persisted {len(tasks_result)} task(s) from channel {channel_id}")
