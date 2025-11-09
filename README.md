@@ -168,7 +168,7 @@ frontend/                                           # main frontend folder
    ├── storage.py                                  # local/session storage for chat data
    └── static/
        └── chatbot.css                             # chatbot styling
-src
+src/
    ├──components/                                # main UI components
       ├── Calendar.jsx                               # calendar view / month-week view
       ├── EventDetailModal.jsx                        # modal showing event details
@@ -176,12 +176,12 @@ src
       └── EventList.jsx                               # sidebar/list of upcoming events
    ├──store/
       ├──events.js                                 # Manages creation, editing, and display of calendar events
-   App.jsx
-   index.html                                    # Main HTML entry — mounts the frontend app, links scripts and global styles
-   main.jsx
-   package-lock.json
-   package.json
-   styles.css
+   App.jsx                                        # Root React component: app layout, routes, and top-level providers
+   index.html                                     # Main HTML entry — mounts the frontend app, links scripts and global styles
+   main.jsx                                       # Client entrypoint: renders <App /> into the DOM and bootstraps providers
+   package-lock.json                              # NPM lockfile: exact dependency tree for reproducible installs (do not edit)
+   package.json                                   # Project manifest: scripts, dependencies, and metadata for npm
+   styles.css                                     # Global styles: base rules, variables, and layout utilities
    
    
 ```
