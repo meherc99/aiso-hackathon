@@ -4,7 +4,8 @@ import os
 import re
 import subprocess
 import threading
-from typing import Any, List, Optional, Tuple
+from collections import defaultdict
+from typing import Any, Dict, List, Optional, Tuple
 
 from datetime import datetime, date, timedelta
 
@@ -17,6 +18,7 @@ from storage import ConversationStore
 store = ConversationStore()
 logger = logging.getLogger(__name__)
 CALENDAR_API = os.getenv("VITE_CALENDAR_API", "http://localhost:5050/api")
+_LATEST_CREATED_EVENT: Dict[str, Dict[str, Any]] = {}
 
 PANEL_CSS = """
 <style>
@@ -375,6 +377,16 @@ _NUMBER_WORDS = {
 
 _NEGATIVE_KEYWORDS = {"earlier", "before", "forward", "sooner", "ahead"}
 
+_BULK_DELETE_KEYWORDS = {
+    "all",
+    "every",
+    "entire",
+    "remove all",
+    "delete all",
+    "clear all",
+    "wipe",
+}
+
 
 def _parse_time_offset(text: Optional[str]) -> Optional[int]:
     if not text:
@@ -446,7 +458,11 @@ def _compute_duration_minutes(start_time: Optional[str], end_time: Optional[str]
     return minutes if minutes > 0 else None
 
 
-def apply_calendar_action(action: Optional[dict], user_message: Optional[str] = None) -> Optional[str]:
+def apply_calendar_action(
+    action: Optional[dict],
+    user_message: Optional[str] = None,
+    conversation_id: Optional[str] = None,
+) -> Optional[str]:
     if not action or action.get("action") in (None, "none"):
         return None
 
@@ -455,13 +471,30 @@ def apply_calendar_action(action: Optional[dict], user_message: Optional[str] = 
     if action_type == "create":
         date_str = (action.get("date") or action.get("date_of_meeting") or "").strip()
         if not date_str:
-            logger.debug("Calendar action create ignored: missing date in %s", action)
-            return "⚠️ I couldn’t schedule that meeting because no date was given."
+            events = fetch_calendar_events(None)
+            suggestions = _suggest_free_days(events)
+            if suggestions:
+                lines = [
+                    "I need a date to schedule that meeting. Here are some upcoming days with availability:",
+                ]
+                for day_str, count in suggestions:
+                    availability = "free" if count == 0 else _format_count(count, "meeting", "meetings")
+                    lines.append(f"- {day_str}: {availability}")
+                lines.append("Let me know which day works best for you.")
+                return "\n".join(lines)
+            return "⚠️ I couldn’t find an open day yet. Please tell me which date you prefer."
 
         start_time = _normalise_time(action.get("start_time") or action.get("startTime"))
-        if not start_time:
-            start_time = "09:00"
         end_time = _normalise_time(action.get("end_time") or action.get("endTime"))
+
+        if not start_time:
+            events = fetch_calendar_events(None)
+            free_slots = _find_free_slots_for_date(events, date_str, 60)
+            if free_slots:
+                slots_text = ", ".join(free_slots)
+                return f"I need a start time for {date_str}. Free slots include {slots_text}. Which one should I book?"
+            return f"⚠️ {date_str} is fully booked. Please choose another time or day."
+
         if not end_time:
             end_time = _add_one_hour(start_time)
 
@@ -482,6 +515,9 @@ def apply_calendar_action(action: Optional[dict], user_message: Optional[str] = 
         try:
             resp = requests.post(f"{CALENDAR_API}/events", json=payload, timeout=10)
             resp.raise_for_status()
+            created_event = resp.json()
+            if conversation_id and isinstance(created_event, dict):
+                _LATEST_CREATED_EVENT[conversation_id] = created_event
         except Exception as exc:
             logger.warning("Failed to create calendar event: %s", exc)
             return "⚠️ I tried to add that meeting but something went wrong."
@@ -501,6 +537,40 @@ def apply_calendar_action(action: Optional[dict], user_message: Optional[str] = 
         date_hint = (action.get("date") or action.get("date_of_meeting") or "").strip()
         raw_time_hint = (action.get("start_time") or action.get("startTime") or "").strip()
         time_hint = _coerce_time_string(raw_time_hint)
+
+        if action_type == "delete" and _wants_bulk_delete(action, user_message):
+            bulk_targets = []
+            if date_hint:
+                bulk_targets = [
+                    event
+                    for event in events
+                    if (event.get("startDate") or event.get("date_of_meeting") or "") == date_hint
+                ]
+            else:
+                bulk_targets = events[:]
+
+            if bulk_targets:
+                deleted_count = 0
+                for event in bulk_targets:
+                    eid = event.get("id")
+                    if not eid:
+                        continue
+                    try:
+                        resp = requests.delete(f"{CALENDAR_API}/events/{eid}", timeout=10)
+                        if resp.status_code in {200, 204, 404}:
+                            deleted_count += 1
+                            if conversation_id and _LATEST_CREATED_EVENT.get(conversation_id, {}).get("id") == eid:
+                                _LATEST_CREATED_EVENT.pop(conversation_id, None)
+                        else:
+                            resp.raise_for_status()
+                    except Exception as exc:
+                        logger.warning("Failed to delete calendar event (bulk): %s", exc)
+                        continue
+
+                if deleted_count:
+                    descriptor = date_hint or "your calendar"
+                    return f"🗑️ Removed {_format_count(deleted_count, 'meeting', 'meetings')} from {descriptor}."
+                return "⚠️ I tried to remove those meetings but something went wrong."
 
         if candidate_id and not target_event:
             target_event = next((ev for ev in events if ev.get("id") == candidate_id), None)
@@ -543,10 +613,25 @@ def apply_calendar_action(action: Optional[dict], user_message: Optional[str] = 
 
         if not candidate_id:
             logger.debug("Calendar delete/reschedule ignored: no matching event for %s", action)
+            if action_type == "delete" and events:
+                return _build_delete_suggestion(events)
             return "⚠️ I couldn’t find a matching meeting to delete." if action_type == "delete" else "⚠️ I couldn’t find the meeting to reschedule."
 
         if not target_event and candidate_id:
             target_event = next((ev for ev in events if ev.get("id") == candidate_id), None)
+
+        latest_request = (
+            action_type == "delete"
+            and conversation_id
+            and conversation_id in _LATEST_CREATED_EVENT
+            and user_message
+            and any(
+                keyword in user_message.lower()
+                for keyword in ["latest", "last", "recent", "just created"]
+            )
+        )
+        if latest_request and not candidate_id:
+            candidate_id = _LATEST_CREATED_EVENT.get(conversation_id, {}).get("id")
 
         try:
             resp = requests.delete(f"{CALENDAR_API}/events/{candidate_id}", timeout=10)
@@ -558,6 +643,8 @@ def apply_calendar_action(action: Optional[dict], user_message: Optional[str] = 
             return "⚠️ I tried to remove that meeting but something went wrong."
 
         logger.info("Deleted calendar event id=%s", candidate_id)
+        if conversation_id and _LATEST_CREATED_EVENT.get(conversation_id, {}).get("id") == candidate_id:
+            _LATEST_CREATED_EVENT.pop(conversation_id, None)
 
         if action_type == "delete":
             return "🗑️ Removed the meeting from your calendar."
@@ -771,7 +858,7 @@ def handle_user_message(
 
     store.append_message(conversation_id, "user", cleaned)
     bot_reply, calendar_action = build_bot_reply(cleaned, history)
-    action_feedback = apply_calendar_action(calendar_action, cleaned)
+    action_feedback = apply_calendar_action(calendar_action, cleaned, conversation_id)
     if action_feedback:
         bot_reply = f"{bot_reply}\n\n{action_feedback}"
     store.append_message(conversation_id, "assistant", bot_reply)
@@ -783,9 +870,21 @@ def handle_user_message(
     return updated_history, "", conversation_id, schedule_html, tasks_html
 
 
-def initialize_interface() -> Tuple[List[Message], str, str, str, str]:
+def initialize_interface(reset: bool = False) -> Tuple[List[Message], str, str, str, str]:
     conversation_id = store.default_conversation_id()
+    if reset:
+        store.reset_conversation(conversation_id)
+        _LATEST_CREATED_EVENT.pop(conversation_id, None)
     messages = store.fetch_messages(conversation_id)
+
+    if not messages:
+        welcome_text = (
+            "Hi! I’m your personal assistant. I can review your calendar, find meetings, "
+            "and help you schedule or update events. Just let me know what you need."
+        )
+        store.append_message(conversation_id, "assistant", welcome_text)
+        messages = store.fetch_messages(conversation_id)
+
     history = messages_to_history(messages)
     schedule_html = render_schedule(get_todays_events(conversation_id))
     tasks_html = render_tasks(fetch_task_list(conversation_id))
@@ -793,21 +892,121 @@ def initialize_interface() -> Tuple[List[Message], str, str, str, str]:
 
 
 def start_new_conversation() -> Tuple[List[Message], str, str, str, str]:
-    store.reset_conversation(store.default_conversation_id())
-    return initialize_interface()
+    return initialize_interface(reset=True)
 
 
 def clear_current_conversation(
     conversation_id: Optional[str],
 ) -> Tuple[List[Message], str, str, str, str]:
-    store.reset_conversation(store.default_conversation_id())
-    return initialize_interface()
+    return initialize_interface(reset=True)
 
 
 def load_conversation(
     conversation_id: Optional[str],
 ) -> Tuple[List[Message], str, str, str, str]:
     return initialize_interface()
+
+
+def _wants_bulk_delete(action: Optional[dict], user_message: Optional[str]) -> bool:
+    texts = []
+    if user_message:
+        texts.append(user_message.lower())
+    if action:
+        for key in ("title", "description", "new_title", "new_description"):
+            value = action.get(key)
+            if value:
+                texts.append(str(value).lower())
+    combined = " ".join(texts)
+    return any(keyword in combined for keyword in _BULK_DELETE_KEYWORDS)
+
+
+def _format_count(n: int, singular: str, plural: str) -> str:
+    return f"{n} {singular if n == 1 else plural}"
+
+
+def _format_event_option(event: dict) -> str:
+    title = event.get("title") or "Untitled meeting"
+    date_part = event.get("startDate") or event.get("date_of_meeting") or ""
+    time_part = event.get("startTime") or event.get("start_time") or ""
+    descriptor = " ".join(value for value in [date_part, time_part] if value)
+    return f"{title} ({descriptor})" if descriptor else title
+
+
+def _build_delete_suggestion(events: List[dict]) -> str:
+    if not events:
+        return "⚠️ I didn’t find any meetings to remove."
+    sorted_events = sorted(
+        events,
+        key=lambda ev: (
+            ev.get("startDate") or ev.get("date_of_meeting") or "",
+            ev.get("startTime") or ev.get("start_time") or "",
+        ),
+    )
+    top_events = sorted_events[:5]
+    lines = ["I’m not sure which meeting to delete. Here are some options:"]
+    for index, event in enumerate(top_events, start=1):
+        lines.append(f"{index}. {_format_event_option(event)}")
+    lines.append("Let me know the exact title, time, or date of the one you want removed.")
+    return "\n".join(lines)
+
+
+def _time_to_minutes(value: Optional[str]) -> Optional[int]:
+    normalised = _normalise_time(value)
+    if not normalised:
+        return None
+    hours, minutes = map(int, normalised.split(":"))
+    return hours * 60 + minutes
+
+
+def _find_free_slots_for_date(events: List[dict], date_str: str, duration_minutes: int = 60) -> List[str]:
+    day_events: List[Tuple[int, int]] = []
+    for event in events:
+        event_date = event.get("startDate") or event.get("date_of_meeting") or ""
+        if event_date != date_str:
+            continue
+        start_minutes = _time_to_minutes(event.get("startTime") or event.get("start_time") or event.get("time"))
+        if start_minutes is None:
+            continue
+        end_minutes = _time_to_minutes(event.get("endTime") or event.get("end_time"))
+        if end_minutes is None:
+            end_minutes = start_minutes + duration_minutes
+        if end_minutes <= start_minutes:
+            end_minutes = start_minutes + duration_minutes
+        day_events.append((start_minutes, end_minutes))
+    day_events.sort()
+
+    suggestions: List[str] = []
+    work_start = 9 * 60
+    work_end = 18 * 60
+    for start_minutes in range(work_start, work_end - duration_minutes + 1, 30):
+        end_minutes = start_minutes + duration_minutes
+        overlap = any(not (end_minutes <= ev_start or start_minutes >= ev_end) for ev_start, ev_end in day_events)
+        if not overlap:
+            suggestions.append(f"{start_minutes // 60:02d}:{start_minutes % 60:02d}")
+        if len(suggestions) >= 5:
+            break
+    return suggestions
+
+
+def _suggest_free_days(events: List[dict], lookahead: int = 7) -> List[Tuple[str, int]]:
+    events_by_date: defaultdict[str, int] = defaultdict(int)
+    for event in events:
+        event_date = event.get("startDate") or event.get("date_of_meeting") or ""
+        if event_date:
+            events_by_date[event_date] += 1
+
+    today = date.today()
+    candidates: List[Tuple[str, int]] = []
+    for offset in range(lookahead):
+        target = today + timedelta(days=offset + 1)
+        day_str = target.isoformat()
+        candidates.append((day_str, events_by_date.get(day_str, 0)))
+
+    free_days = [item for item in candidates if item[1] == 0]
+    if free_days:
+        return free_days[:5]
+
+    return sorted(candidates, key=lambda item: item[1])[:5]
 
 
 def build_app() -> gr.Blocks:
@@ -846,8 +1045,9 @@ def build_app() -> gr.Blocks:
                                 autofocus=True,
                                 lines=1,
                                 max_lines=3,
-                                scale=9,
+                                scale=8,
                             )
+                            clear_button = gr.Button("Clear", size="sm", variant="secondary", scale=1, min_width=60)
                             send = gr.Button("➤", size="sm", scale=1, min_width=50)
 
                     with gr.Column(scale=2, min_width=260):
@@ -889,7 +1089,7 @@ def build_app() -> gr.Blocks:
              
 
         demo.load(
-            initialize_interface,
+            lambda: initialize_interface(reset=True),
             inputs=None,
             outputs=[
                 chatbot,
@@ -929,6 +1129,19 @@ def build_app() -> gr.Blocks:
             run_agent_background,
             inputs=[conversation_state],
             outputs=[schedule_panel, tasks_panel],
+            queue=False,
+        )
+
+        clear_button.click(
+            clear_current_conversation,
+            inputs=[conversation_state],
+            outputs=[
+                chatbot,
+                message,
+                conversation_state,
+                schedule_panel,
+                tasks_panel,
+            ],
             queue=False,
         )
 
