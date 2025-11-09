@@ -192,7 +192,7 @@ def master_agent() -> None:
     
     # Print summary
     print("\n" + "="*70)
-    print("📊 PROCESSING SUMMARY")
+    print(" PROCESSING SUMMARY")
     print("="*70)
     
     total_meetings = sum(r['meetings_count'] for r in results)
@@ -211,7 +211,7 @@ def master_agent() -> None:
     
     # Show database contents
     print("\n" + "="*70)
-    print("📊 DATABASE VERIFICATION")
+    print(" DATABASE VERIFICATION")
     print("="*70)
     all_meetings = db.get_all_meetings()
     all_tasks = db.get_all_tasks()

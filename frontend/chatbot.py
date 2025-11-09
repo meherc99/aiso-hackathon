@@ -1,5 +1,7 @@
 import html
 import os
+import subprocess
+import threading
 from typing import Any, List, Optional, Tuple
 
 from datetime import datetime, date
@@ -143,6 +145,92 @@ PANEL_CSS = """
 .gradio-container .loading span {
     display: none !important;
 }
+
+/* Magic AI Button Styling */
+#magic-ai-button {
+    position: relative;
+    background: linear-gradient(135deg, #0066ff 0%, #00ccff 100%);
+    border: none;
+    border-radius: 50px;
+    padding: 16px 48px;
+    font-size: 18px;
+    font-weight: 600;
+    color: white;
+    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
+    box-shadow: 
+        0 4px 15px rgba(0, 102, 255, 0.4),
+        0 0 30px rgba(0, 204, 255, 0.3),
+        inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    cursor: pointer;
+    transition: all 0.3s ease;
+    overflow: hidden;
+    margin: 20px auto;
+    display: block;
+    width: fit-content;
+}
+
+#magic-ai-button::before {
+    content: '';
+    position: absolute;
+    top: -50%;
+    left: -50%;
+    width: 200%;
+    height: 200%;
+    background: linear-gradient(
+        45deg,
+        transparent,
+        rgba(255, 255, 255, 0.1),
+        transparent
+    );
+    transform: rotate(45deg);
+    animation: shimmer 3s infinite;
+}
+
+@keyframes shimmer {
+    0% {
+        transform: translateX(-100%) translateY(-100%) rotate(45deg);
+    }
+    100% {
+        transform: translateX(100%) translateY(100%) rotate(45deg);
+    }
+}
+
+#magic-ai-button:hover {
+    transform: translateY(-2px);
+    box-shadow: 
+        0 6px 25px rgba(0, 102, 255, 0.6),
+        0 0 50px rgba(0, 204, 255, 0.5),
+        inset 0 1px 0 rgba(255, 255, 255, 0.4);
+    background: linear-gradient(135deg, #0077ff 0%, #00ddff 100%);
+}
+
+#magic-ai-button:active {
+    transform: translateY(0px);
+    box-shadow: 
+        0 2px 10px rgba(0, 102, 255, 0.5),
+        0 0 20px rgba(0, 204, 255, 0.4),
+        inset 0 1px 0 rgba(255, 255, 255, 0.2);
+}
+
+/* Pulsing glow animation */
+@keyframes pulse-glow {
+    0%, 100% {
+        box-shadow: 
+            0 4px 15px rgba(0, 102, 255, 0.4),
+            0 0 30px rgba(0, 204, 255, 0.3),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+    50% {
+        box-shadow: 
+            0 4px 20px rgba(0, 102, 255, 0.6),
+            0 0 45px rgba(0, 204, 255, 0.5),
+            inset 0 1px 0 rgba(255, 255, 255, 0.3);
+    }
+}
+
+#magic-ai-button {
+    animation: pulse-glow 2s ease-in-out infinite;
+}
 </style>
 """
 
@@ -282,6 +370,56 @@ def render_tasks(tasks: List[dict]) -> str:
         desc_html = f'<div class="task-desc">{description}</div>' if description else ""
         items.append(f"<li><span class=\"task-title\">{title}</span>{desc_html}</li>")
     return f'<ul class="tasks-list">{"".join(items)}</ul>'
+
+
+def run_agent_background(conversation_id: Optional[str]) -> Tuple[str, str]:
+    """
+    Run the backend agent.py script in a background thread.
+    Returns updated schedule and tasks HTML after execution.
+    """
+    def run_agent():
+        try:
+            # Get the project root directory
+            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+            agent_path = os.path.join(project_root, "backend", "agent.py")
+            
+            print(f"[chatbot] Starting AI agent: {agent_path}")
+            
+            # Run the agent script
+            result = subprocess.run(
+                ["python", agent_path],
+                cwd=project_root,
+                capture_output=True,
+                text=True,
+                timeout=300  # 5 minute timeout
+            )
+            
+            if result.returncode == 0:
+                print(f"[chatbot] AI agent completed successfully")
+                print(f"[chatbot] Agent output:\n{result.stdout}")
+            else:
+                print(f"[chatbot] AI agent failed with code {result.returncode}")
+                print(f"[chatbot] Error output:\n{result.stderr}")
+                
+        except subprocess.TimeoutExpired:
+            print(f"[chatbot] AI agent timed out after 5 minutes")
+        except Exception as exc:
+            print(f"[chatbot] Failed to run AI agent: {exc}")
+    
+    # Start agent in background thread
+    thread = threading.Thread(target=run_agent, daemon=True)
+    thread.start()
+    
+    # Return status message
+    status_message = """
+    <div style="padding: 20px; text-align: center; background: linear-gradient(135deg, #0066ff22 0%, #00ccff22 100%); border-radius: 12px; border: 2px solid #0066ff44;">
+        <h3 style="color: #0066ff; margin: 0 0 10px 0;">🚀 AI Agent Running</h3>
+        <p style="margin: 0; color: #666;">Processing Slack messages and extracting meetings/tasks...</p>
+        <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #999;">This may take a few minutes. Results will appear when complete.</p>
+    </div>
+    """
+    
+    return status_message, status_message
 
 
 def handle_user_message(
@@ -425,6 +563,15 @@ def build_app() -> gr.Blocks:
                             height="80vh",
                             type="messages",
                         )
+                        
+                        # Magic AI Button
+                        magic_button = gr.Button(
+                            "AI Magic",
+                            elem_id="magic-ai-button",
+                            size="lg",
+                            variant="primary"
+                        )
+                        
                         with gr.Row():
                             
                             message = gr.Textbox(
@@ -540,6 +687,13 @@ def build_app() -> gr.Blocks:
                 schedule_panel,
                 tasks_panel,
             ],
+            queue=False,
+        )
+
+        magic_button.click(
+            run_agent_background,
+            inputs=[conversation_state],
+            outputs=[schedule_panel, tasks_panel],
             queue=False,
         )
 
