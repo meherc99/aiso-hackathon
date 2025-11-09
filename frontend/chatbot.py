@@ -1,14 +1,17 @@
 import html
+import os
 from typing import Any, List, Optional, Tuple
 
 from datetime import datetime, date
 
 import gradio as gr
+import requests
 
 from chat_logic import Message, build_bot_reply, messages_to_history
 from storage import ConversationStore
 
 store = ConversationStore()
+CALENDAR_API = os.getenv("VITE_CALENDAR_API", "http://localhost:5050/api")
 
 PANEL_CSS = """
 <style>
@@ -166,58 +169,16 @@ def conversation_list_update(selected_id: Optional[str], prioritize_selected: bo
 
 
 def fetch_calendar_events(_: Optional[str]) -> List[dict]:
-    """Placeholder for real calendar events backing. Replace with real fetch."""
-    today = date.today().isoformat()
-    return [
-        {
-            "id": "event-1",
-            "title": "Daily Standup",
-            "description": "Team sync-up",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "08:30",
-            "endTime": "09:00",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-        {
-            "id": "event-2",
-            "title": "Client Sync",
-            "description": "Status update with client",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "10:00",
-            "endTime": "11:00",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-        {
-            "id": "event-3",
-            "title": "Product Review",
-            "description": "Review latest feature progress",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "13:30",
-            "endTime": "14:00",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-        {
-            "id": "event-4",
-            "title": "1:1 Check-in",
-            "description": "Weekly 1:1",
-            "startDate": today,
-            "endDate": today,
-            "startTime": "16:00",
-            "endTime": "16:30",
-            "category": "",
-            "done": False,
-            "created_at": datetime.now().isoformat(),
-        },
-    ]
+    """Fetch events from the calendar server REST API."""
+    try:
+        response = requests.get(f"{CALENDAR_API}/events", timeout=10)
+        response.raise_for_status()
+        events = response.json()
+        if isinstance(events, list):
+            return events
+    except Exception as exc:
+        print(f"[chatbot] Failed to load calendar events: {exc}")
+    return []
 
 
 def get_todays_events(conversation_id: Optional[str]) -> List[dict]:
@@ -231,21 +192,30 @@ def get_todays_events(conversation_id: Optional[str]) -> List[dict]:
 
 
 def fetch_task_list(_: Optional[str]) -> List[dict]:
-    """Stub function returning placeholder tasks for the sidebar."""
-    return [
-        {
-            "title": "Draft project brief",
-            "description": "Summarize objectives, timeline, and success metrics.",
-        },
-        {
-            "title": "Review design mockups",
-            "description": "Waiting on updated assets from design team.",
-        },
-        {
-            "title": "Send status update email",
-            "description": "Share latest milestones with stakeholders.",
-        },
-    ]
+    """Fetch tasks captured by the agent from the calendar server REST API."""
+    try:
+        response = requests.get(f"{CALENDAR_API}/tasks", timeout=10)
+        response.raise_for_status()
+        payload = response.json()
+    except Exception as exc:
+        print(f"[chatbot] Failed to load tasks: {exc}")
+        return []
+
+    if not isinstance(payload, list):
+        return []
+
+    tasks: List[dict] = []
+    for item in payload:
+        tasks.append(
+            {
+                "title": item.get("title") or "Untitled task",
+                "description": item.get("description") or "",
+                "dueDate": item.get("date_of_meeting"),
+                "dueTime": item.get("start_time"),
+                "completed": item.get("meeting_completed", False),
+            }
+        )
+    return tasks
 
 
 def render_schedule(events: List[dict]) -> str:

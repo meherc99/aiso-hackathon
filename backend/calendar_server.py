@@ -142,6 +142,10 @@ class CalendarStore:
             return True
         return self._db.delete_task(event_id)
 
+    def list_tasks(self) -> List[Dict[str, Any]]:
+        """Return raw task records from the JSON database."""
+        return self._db.get_all_tasks()
+
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -184,6 +188,13 @@ def get_event(event_id: str):
     if not event:
         return jsonify({"error": "Event not found"}), 404
     return jsonify(event)
+
+
+@app.route("/api/tasks", methods=["GET"])
+def get_tasks():
+    """Return tasks captured by the agent."""
+    tasks = calendar_store.list_tasks()
+    return jsonify(tasks)
 
 
 @app.route("/api/events", methods=["POST"])
