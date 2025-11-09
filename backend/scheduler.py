@@ -24,10 +24,16 @@ def job():
 
 def main():
     """Main scheduler loop."""
+    from datetime import timedelta
+    
     print("Slack Agent Scheduler started")
     print(f"Will run every minute")
     print(f"First run: immediately")
-    print(f"Next run: {datetime.now().replace(second=0, microsecond=0).replace(minute=datetime.now().minute + 1)}")
+    
+    # Calculate next run time properly (handles minute=59 case)
+    next_run = datetime.now() + timedelta(minutes=1)
+    next_run = next_run.replace(second=0, microsecond=0)
+    print(f"Next run: {next_run}")
     print("\nPress Ctrl+C to stop\n")
     
     # Run immediately on start

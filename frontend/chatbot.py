@@ -1,10 +1,12 @@
 import html
+import logging
 import os
 import subprocess
 import threading
 from typing import Any, List, Optional, Tuple
+import time
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import gradio as gr
 import requests
@@ -13,226 +15,14 @@ from chat_logic import Message, build_bot_reply, messages_to_history
 from storage import ConversationStore
 
 store = ConversationStore()
+logger = logging.getLogger(__name__)
 CALENDAR_API = os.getenv("VITE_CALENDAR_API", "http://localhost:5050/api")
 
-PANEL_CSS = """
-<style>
-.panel-card {
-    background: var(--block-background-fill);
-    border: 1px solid var(--border-color-primary);
-    border-radius: var(--radius-lg);
-    padding: 12px;
-    gap: 10px;
-    margin-bottom: 12px;
-}
-.panel-card:last-of-type {
-    margin-bottom: 0;
-}
-.panel-card h3 {
-    margin: 0;
-    font-size: 1.05rem;
-}
-.schedule-grid {
-    display: flex;
-    flex-direction: column;
-    gap: 6px;
-    max-height: 360px;
-    overflow-y: auto;
-    padding-right: 4px;
-}
-.schedule-row {
-    display: grid;
-    grid-template-columns: 70px 1fr;
-    align-items: center;
-    column-gap: 12px;
-    padding: 6px 8px;
-    border-radius: var(--radius-md);
-    background: var(--background-fill-secondary);
-}
-.schedule-row.has-meeting {
-    background: color-mix(in srgb, var(--secondary-600) 18%, transparent);
-    border-left: 3px solid var(--secondary-500);
-}
-.schedule-time {
-    font-weight: 600;
-    color: var(--body-text-color);
-}
-.schedule-title {
-    color: var(--body-text-color);
-    opacity: 0.85;
-}
-.schedule-empty {
-    color: var(--body-text-color);
-    opacity: 0.4;
-    font-style: italic;
-}
-.schedule-grid::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-}
-.schedule-grid {
-    scrollbar-width: none;
-}
-.tasks-list {
-    list-style: disc inside;
-    padding-left: 0;
-    margin: 0;
-    max-height: 260px;
-    overflow-y: auto;
-    padding-right: 4px;
-}
-.tasks-list li {
-    margin-bottom: 10px;
-    color: var(--body-text-color);
-}
-.tasks-list li:last-of-type {
-    margin-bottom: 0;
-}
-.task-title {
-    font-weight: 600;
-    color: var(--body-text-color);
-}
-.task-desc {
-    font-size: 0.9rem;
-    opacity: 0.75;
-    margin-top: 4px;
-}
-.task-status {
-    padding: 2px 10px;
-    border-radius: 999px;
-    font-size: 0.85rem;
-}
-.status-not-started,
-.status-in-progress,
-.status-blocked {
-    display: none;
-}
-.task-empty {
-    font-style: italic;
-    opacity: 0.6;
-}
-.tasks-list::-webkit-scrollbar {
-    width: 0;
-    height: 0;
-}
-.tasks-list {
-    scrollbar-width: none;
-}
-.sidebar-column {
-    gap: 12px;
-}
-.conversation-card {
-    gap: 10px;
-}
-.sidebar-heading {
-    margin: 0;
-}
-.sidebar-new-btn button {
-    width: 100%;
-}
-.gradio-container .loading,
-.gradio-container .progress-bar,
-.gradio-container .progress-bar-wrap,
-.gradio-container .progress-bars,
-.gradio-container .progress-info,
-.gradio-container .progress-viewer,
-.gradio-container .progress-viewer * ,
-.gradio-container .absolute.w-full.h-full.bg-gradient-to-r.from-gray-50.to-gray-100/80.backdrop-blur {
-    display: none !important;
-    opacity: 0 !important;
-    visibility: hidden !important;
-}
-.gradio-container .loading span {
-    display: none !important;
-}
+# Get the path to the CSS file
+CSS_FILE = os.path.join(os.path.dirname(__file__), "static", "chatbot.css")
 
-/* Magic AI Button Styling */
-#magic-ai-button {
-    position: relative;
-    background: linear-gradient(135deg, #0066ff 0%, #00ccff 100%);
-    border: none;
-    border-radius: 50px;
-    padding: 16px 48px;
-    font-size: 18px;
-    font-weight: 600;
-    color: white;
-    text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    box-shadow: 
-        0 4px 15px rgba(0, 102, 255, 0.4),
-        0 0 30px rgba(0, 204, 255, 0.3),
-        inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    cursor: pointer;
-    transition: all 0.3s ease;
-    overflow: hidden;
-    margin: 20px auto;
-    display: block;
-    width: fit-content;
-}
-
-#magic-ai-button::before {
-    content: '';
-    position: absolute;
-    top: -50%;
-    left: -50%;
-    width: 200%;
-    height: 200%;
-    background: linear-gradient(
-        45deg,
-        transparent,
-        rgba(255, 255, 255, 0.1),
-        transparent
-    );
-    transform: rotate(45deg);
-    animation: shimmer 3s infinite;
-}
-
-@keyframes shimmer {
-    0% {
-        transform: translateX(-100%) translateY(-100%) rotate(45deg);
-    }
-    100% {
-        transform: translateX(100%) translateY(100%) rotate(45deg);
-    }
-}
-
-#magic-ai-button:hover {
-    transform: translateY(-2px);
-    box-shadow: 
-        0 6px 25px rgba(0, 102, 255, 0.6),
-        0 0 50px rgba(0, 204, 255, 0.5),
-        inset 0 1px 0 rgba(255, 255, 255, 0.4);
-    background: linear-gradient(135deg, #0077ff 0%, #00ddff 100%);
-}
-
-#magic-ai-button:active {
-    transform: translateY(0px);
-    box-shadow: 
-        0 2px 10px rgba(0, 102, 255, 0.5),
-        0 0 20px rgba(0, 204, 255, 0.4),
-        inset 0 1px 0 rgba(255, 255, 255, 0.2);
-}
-
-/* Pulsing glow animation */
-@keyframes pulse-glow {
-    0%, 100% {
-        box-shadow: 
-            0 4px 15px rgba(0, 102, 255, 0.4),
-            0 0 30px rgba(0, 204, 255, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    }
-    50% {
-        box-shadow: 
-            0 4px 20px rgba(0, 102, 255, 0.6),
-            0 0 45px rgba(0, 204, 255, 0.5),
-            inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    }
-}
-
-#magic-ai-button {
-    animation: pulse-glow 2s ease-in-out infinite;
-}
-</style>
-"""
+# Link to external CSS for browser caching
+PANEL_CSS = '<link rel="stylesheet" href="/static/chatbot.css">'
 
 
 def conversation_list_update(selected_id: Optional[str], prioritize_selected: bool = False):
@@ -306,6 +96,116 @@ def fetch_task_list(_: Optional[str]) -> List[dict]:
     return tasks
 
 
+def _add_one_hour(start_time: str) -> str:
+    try:
+        base = datetime.strptime(start_time, "%H:%M")
+    except ValueError:
+        base = datetime.strptime("09:00", "%H:%M")
+    end = base + timedelta(hours=1)
+    return end.strftime("%H:%M")
+
+
+def _normalise_time(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        datetime.strptime(value, "%H:%M")
+        return value
+    except ValueError:
+        return None
+
+
+def apply_calendar_action(action: Optional[dict]) -> Optional[str]:
+    if not action or action.get("action") in (None, "none"):
+        return None
+
+    action_type = action.get("action")
+
+    if action_type == "create":
+        date_str = (action.get("date") or action.get("date_of_meeting") or "").strip()
+        if not date_str:
+            logger.debug("Calendar action create ignored: missing date in %s", action)
+            return "⚠️ I couldn’t schedule that meeting because no date was given."
+
+        start_time = _normalise_time(action.get("start_time") or action.get("startTime"))
+        if not start_time:
+            start_time = "09:00"
+        end_time = _normalise_time(action.get("end_time") or action.get("endTime"))
+        if not end_time:
+            end_time = _add_one_hour(start_time)
+
+        title = (action.get("title") or "Meeting").strip() or "Meeting"
+        description = (action.get("description") or "").strip()
+        payload = {
+            "title": title,
+            "description": description,
+            "startDate": date_str,
+            "endDate": date_str,
+            "startTime": start_time,
+            "endTime": end_time,
+            "category": action.get("category") or "work",
+        }
+
+        try:
+            resp = requests.post(f"{CALENDAR_API}/events", json=payload, timeout=10)
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Failed to create calendar event: %s", exc)
+            return "⚠️ I tried to add that meeting but something went wrong."
+
+        logger.info("Created calendar event: %s", payload)
+        return f"✅ Scheduled “{title}” on {date_str} at {start_time}."
+
+    if action_type == "delete":
+        try:
+            events = fetch_calendar_events(None)
+        except Exception:
+            events = []
+
+        candidate_id = action.get("event_id") or action.get("id")
+        title_hint = (action.get("title") or "").strip().lower()
+        date_hint = (action.get("date") or action.get("date_of_meeting") or "").strip()
+        time_hint = (action.get("start_time") or action.get("startTime") or "").strip()
+
+        if not candidate_id:
+            for event in events:
+                event_title = (event.get("title") or "").lower()
+                event_date = event.get("startDate") or event.get("date_of_meeting") or ""
+                event_time = event.get("startTime") or event.get("start_time") or ""
+
+                if title_hint and title_hint not in event_title:
+                    continue
+                if date_hint and date_hint != event_date:
+                    continue
+                if time_hint and time_hint != event_time:
+                    continue
+                candidate_id = event.get("id")
+                if candidate_id:
+                    break
+
+        if not candidate_id:
+            logger.debug("Calendar delete: fell back to events search, candidate=%s", candidate_id)
+
+        if not candidate_id:
+            logger.debug("Calendar delete ignored: no matching event for %s", action)
+            return "⚠️ I couldn’t find a matching meeting to delete."
+
+        try:
+            resp = requests.delete(f"{CALENDAR_API}/events/{candidate_id}", timeout=10)
+            if resp.status_code == 404:
+                return "⚠️ I couldn’t find a matching meeting to delete."
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Failed to delete calendar event: %s", exc)
+            return "⚠️ I tried to remove that meeting but something went wrong."
+
+        logger.info("Deleted calendar event id=%s", candidate_id)
+        return "🗑️ Removed the meeting from your calendar."
+
+    return None
+
+
 def render_schedule(events: List[dict]) -> str:
     hours = [f"{hour:02d}:00" for hour in range(8, 18)]
     slots: dict[str, List[str]] = {hour: [] for hour in hours}
@@ -374,52 +274,149 @@ def render_tasks(tasks: List[dict]) -> str:
 
 def run_agent_background(conversation_id: Optional[str]) -> Tuple[str, str]:
     """
-    Run the backend agent.py script in a background thread.
-    Returns updated schedule and tasks HTML after execution.
+    Run the backend agent.py script and wait for scheduler to process results.
+    This ensures the UI shows accurate data after completion.
     """
-    def run_agent():
-        try:
-            # Get the project root directory
-            project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
-            agent_path = os.path.join(project_root, "backend", "agent.py")
+    try:
+        # Get the project root directory
+        project_root = os.path.dirname(os.path.dirname(os.path.abspath(__file__)))
+        agent_path = os.path.join(project_root, "backend", "agent.py")
+        
+        print(f"[chatbot] Starting AI agent: {agent_path}")
+        
+        # Get initial counts to compare later
+        initial_events = fetch_calendar_events(conversation_id)
+        initial_tasks = fetch_task_list(conversation_id)
+        initial_event_count = len(initial_events)
+        initial_task_count = len(initial_tasks)
+        
+        # Run the agent script synchronously
+        result = subprocess.run(
+            ["python", agent_path],
+            cwd=project_root,
+            capture_output=True,
+            text=True,
+            timeout=300  # 5 minute timeout
+        )
+        
+        if result.returncode == 0:
+            print(f"[chatbot] AI agent completed successfully")
+            print(f"[chatbot] Agent output:\n{result.stdout}")
             
-            print(f"[chatbot] Starting AI agent: {agent_path}")
+            # Wait for scheduler to process the results
+            # Poll the database every 2 seconds for up to 2 minutes
+            max_wait_time = 120  # 2 minutes
+            poll_interval = 2  # seconds
+            elapsed = 0
             
-            # Run the agent script
-            result = subprocess.run(
-                ["python", agent_path],
-                cwd=project_root,
-                capture_output=True,
-                text=True,
-                timeout=300  # 5 minute timeout
-            )
+            print(f"[chatbot] Waiting for scheduler to process results...")
             
-            if result.returncode == 0:
-                print(f"[chatbot] AI agent completed successfully")
-                print(f"[chatbot] Agent output:\n{result.stdout}")
-            else:
-                print(f"[chatbot] AI agent failed with code {result.returncode}")
-                print(f"[chatbot] Error output:\n{result.stderr}")
+            while elapsed < max_wait_time:
+                time.sleep(poll_interval)
+                elapsed += poll_interval
                 
-        except subprocess.TimeoutExpired:
-            print(f"[chatbot] AI agent timed out after 5 minutes")
-        except Exception as exc:
-            print(f"[chatbot] Failed to run AI agent: {exc}")
-    
-    # Start agent in background thread
-    thread = threading.Thread(target=run_agent, daemon=True)
-    thread.start()
-    
-    # Return status message
-    status_message = """
-    <div style="padding: 20px; text-align: center; background: linear-gradient(135deg, #0066ff22 0%, #00ccff22 100%); border-radius: 12px; border: 2px solid #0066ff44;">
-        <h3 style="color: #0066ff; margin: 0 0 10px 0;">AI Agent Running</h3>
-        <p style="margin: 0; color: #666;">Processing Slack messages and extracting meetings/tasks...</p>
-        <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #999;">This may take a few minutes. Results will appear when complete.</p>
-    </div>
-    """
-    
-    return status_message, status_message
+                # Check if new events or tasks have appeared
+                current_events = fetch_calendar_events(conversation_id)
+                current_tasks = fetch_task_list(conversation_id)
+                current_event_count = len(current_events)
+                current_task_count = len(current_tasks)
+                
+                # If we have new data, the scheduler has processed
+                if current_event_count > initial_event_count or current_task_count > initial_task_count:
+                    print(f"[chatbot] Scheduler processed results after {elapsed}s")
+                    print(f"[chatbot] Events: {initial_event_count} -> {current_event_count}")
+                    print(f"[chatbot] Tasks: {initial_task_count} -> {current_task_count}")
+                    break
+                
+                # Show progress
+                if elapsed % 10 == 0:
+                    print(f"[chatbot] Still waiting... ({elapsed}s elapsed)")
+            
+            # Fetch final data after waiting
+            final_events = fetch_calendar_events(conversation_id)
+            final_tasks = fetch_task_list(conversation_id)
+            meetings_count = len(final_events)
+            tasks_count = len(final_tasks)
+            
+            # Calculate what was added
+            new_meetings = meetings_count - initial_event_count
+            new_tasks = tasks_count - initial_task_count
+            
+            # Render the updated panels
+            schedule_html = render_schedule(get_todays_events(conversation_id))
+            tasks_html = render_tasks(final_tasks)
+            
+            # Add success message with actual counts
+            if new_meetings > 0 or new_tasks > 0:
+                success_msg = f"""
+                <div style="padding: 12px; margin-bottom: 12px; background: linear-gradient(135deg, #00ff8822 0%, #00ff4422 100%); border-radius: 8px; border: 2px solid #00ff8844;">
+                    <div style="font-weight: 600; color: #00aa44; margin-bottom: 4px;">✓ AI Agent Completed</div>
+                    <div style="font-size: 0.9em; color: #666;">
+                        Added {new_meetings} new meeting(s) and {new_tasks} new task(s)
+                        <br>Total: {meetings_count} meeting(s) and {tasks_count} task(s)
+                    </div>
+                </div>
+                {schedule_html}
+                """
+            else:
+                success_msg = f"""
+                <div style="padding: 12px; margin-bottom: 12px; background: linear-gradient(135deg, #ffaa0022 0%, #ff880022 100%); border-radius: 8px; border: 2px solid #ffaa0044;">
+                    <div style="font-weight: 600; color: #cc6600; margin-bottom: 4px;">✓ AI Agent Completed</div>
+                    <div style="font-size: 0.9em; color: #666;">
+                        No new meetings or tasks found
+                        <br>Waited {elapsed}s for scheduler processing
+                    </div>
+                </div>
+                {schedule_html}
+                """
+            
+            return success_msg, tasks_html
+            
+        else:
+            print(f"[chatbot] AI agent failed with code {result.returncode}")
+            print(f"[chatbot] Error output:\n{result.stderr}")
+            
+            error_msg = """
+            <div style="padding: 12px; background: linear-gradient(135deg, #ff444422 0%, #ff000022 100%); border-radius: 8px; border: 2px solid #ff444444;">
+                <div style="font-weight: 600; color: #cc0000; margin-bottom: 4px;">✗ AI Agent Failed</div>
+                <div style="font-size: 0.9em; color: #666;">Check terminal logs for details</div>
+            </div>
+            """
+            
+            schedule_html = render_schedule(get_todays_events(conversation_id))
+            tasks_html = render_tasks(fetch_task_list(conversation_id))
+            
+            return error_msg + schedule_html, tasks_html
+            
+    except subprocess.TimeoutExpired:
+        print(f"[chatbot] AI agent timed out after 5 minutes")
+        
+        timeout_msg = """
+        <div style="padding: 12px; background: linear-gradient(135deg, #ffaa0022 0%, #ff880022 100%); border-radius: 8px; border: 2px solid #ffaa0044;">
+            <div style="font-weight: 600; color: #cc6600; margin-bottom: 4px;">⏱ AI Agent Timeout</div>
+            <div style="font-size: 0.9em; color: #666;">Processing took longer than 5 minutes</div>
+        </div>
+        """
+        
+        schedule_html = render_schedule(get_todays_events(conversation_id))
+        tasks_html = render_tasks(fetch_task_list(conversation_id))
+        
+        return timeout_msg + schedule_html, tasks_html
+        
+    except Exception as exc:
+        print(f"[chatbot] Failed to run AI agent: {exc}")
+        
+        error_msg = f"""
+        <div style="padding: 12px; background: linear-gradient(135deg, #ff444422 0%, #ff000022 100%); border-radius: 8px; border: 2px solid #ff444444;">
+            <div style="font-weight: 600; color: #cc0000; margin-bottom: 4px;">✗ Error Running Agent</div>
+            <div style="font-size: 0.9em; color: #666;">{html.escape(str(exc))}</div>
+        </div>
+        """
+        
+        schedule_html = render_schedule(get_todays_events(conversation_id))
+        tasks_html = render_tasks(fetch_task_list(conversation_id))
+        
+        return error_msg + schedule_html, tasks_html
 
 
 def handle_user_message(
@@ -445,7 +442,10 @@ def handle_user_message(
         return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
     store.append_message(conversation_id, "user", cleaned)
-    bot_reply = build_bot_reply(cleaned, history)
+    bot_reply, calendar_action = build_bot_reply(cleaned, history)
+    action_feedback = apply_calendar_action(calendar_action)
+    if action_feedback:
+        bot_reply = f"{bot_reply}\n\n{action_feedback}"
     store.append_message(conversation_id, "assistant", bot_reply)
     store.update_title_if_missing(conversation_id, cleaned)
 
@@ -535,8 +535,7 @@ def load_conversation(
 def build_app() -> gr.Blocks:
     theme = gr.themes.Soft(primary_hue="blue", secondary_hue="slate", radius_size="lg")
 
-    with gr.Blocks(theme=theme) as demo:
-        gr.HTML(PANEL_CSS)
+    with gr.Blocks(theme=theme, css_paths=[CSS_FILE]) as demo:
         conversation_state = gr.State()
 
         # Tab system for Chat and Calendar views
@@ -694,7 +693,7 @@ def build_app() -> gr.Blocks:
             run_agent_background,
             inputs=[conversation_state],
             outputs=[schedule_panel, tasks_panel],
-            queue=False,
+            queue=True,  # Enable queue to show loading state
         )
 
     return demo

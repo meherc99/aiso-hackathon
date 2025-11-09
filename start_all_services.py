@@ -57,13 +57,28 @@ def read_output(proc, queue, service_name, color):
         queue.put((service_name, "\033[91m", f"Error reading output: {e}"))
 
 
-def print_output_worker(queue):
+def print_output_worker(queue, start_time_ref):
     """Print output from all services."""
+    first_log_printed = [False]  # Use list to allow modification in nested scope
+    first_api_call_printed = [False]  # Track first API call
+    
     while True:
         try:
             service_name, color, line = queue.get(timeout=0.1)
             if line:
                 print(f"{color}[{service_name}]\033[0m {line}")
+                
+                # Print runtime after first service log (only once)
+                if not first_log_printed[0]:
+                    first_log_printed[0] = True
+                    elapsed = time.time() - start_time_ref[0]
+                    print(f"\n\033[90mTime to first service log: {elapsed:.2f} seconds\033[0m\n")
+                
+                # Print runtime after first API call (only once)
+                if not first_api_call_printed[0] and "GET /api/" in line and '"' in line:
+                    first_api_call_printed[0] = True
+                    elapsed = time.time() - start_time_ref[0]
+                    print(f"\n\033[90mTime to first API call: {elapsed:.2f} seconds\033[0m\n")
         except:
             continue
 
@@ -106,6 +121,8 @@ def start_service(service):
 
 
 def main():
+    start_time = time.time()
+    
     print("\033[96m" + "="*60)
     print("Starting All Services")
     print("="*60 + "\033[0m\n")
@@ -118,8 +135,11 @@ def main():
     # Create a shared queue for output
     output_queue = Queue()
     
+    # Shared reference for start time (so printer thread can access it)
+    start_time_ref = [start_time]
+    
     # Start output printer thread
-    printer_thread = Thread(target=print_output_worker, args=(output_queue,), daemon=True)
+    printer_thread = Thread(target=print_output_worker, args=(output_queue, start_time_ref), daemon=True)
     printer_thread.start()
 
     # Start all services
@@ -175,9 +195,14 @@ def main():
     print("Main app running on: http://localhost:7860")
     print("Calendar app running on: http://localhost:5050")
     print("React dev server running on: http://localhost:5173")
+    
+    # Calculate and display startup time
+    elapsed_time = time.time() - start_time
+    print(f"\nStartup completed in {elapsed_time:.2f} seconds")
     print("\033[90m" + "-"*60 + "\033[0m\n")
 
     # Monitor processes
+    first_log_seen = False
     try:
         while True:
             time.sleep(2)
