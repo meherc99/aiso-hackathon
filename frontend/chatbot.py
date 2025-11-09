@@ -244,6 +244,18 @@ FREE_TIME_KEYWORDS = {
     "hobby",
 }
 
+_RESCHEDULE_KEYWORDS = {
+    "move",
+    "reschedule",
+    "resched",
+    "shift",
+    "postpone",
+    "delay",
+    "push",
+    "later",
+    "back",
+}
+
 
 def _infer_category(action: dict | None, default: str = "work") -> str:
     if not action:
@@ -508,6 +520,19 @@ def apply_calendar_action(
 
         title = (action.get("title") or "Meeting").strip() or "Meeting"
         description = (action.get("description") or "").strip()
+
+        if start_time and _looks_like_reschedule(action, user_message):
+            existing_events = fetch_calendar_events(None)
+            _maybe_delete_reschedule_conflict(
+                existing_events,
+                title,
+                date_str,
+                start_time,
+                action,
+                user_message,
+                conversation_id,
+            )
+
         payload = {
             "title": title,
             "description": description,
@@ -1096,6 +1121,120 @@ def _suggest_free_days(events: List[dict], lookahead: int = 7) -> List[Tuple[str
         return free_days[:5]
 
     return sorted(candidates, key=lambda item: item[1])[:5]
+
+
+def _looks_like_reschedule(action: Optional[dict], user_message: Optional[str]) -> bool:
+    texts: List[str] = []
+    if user_message:
+        texts.append(user_message.lower())
+    if action:
+        for key in (
+            "description",
+            "title",
+            "new_description",
+            "new_title",
+            "meta",
+        ):
+            value = action.get(key)
+            if isinstance(value, str):
+                texts.append(value.lower())
+    combined = " ".join(texts)
+    return any(keyword in combined for keyword in _RESCHEDULE_KEYWORDS)
+
+
+def _extract_time_candidates(text: Optional[str]) -> List[str]:
+    if not text:
+        return []
+    pattern = re.compile(r"\b(\d{1,2})(?::(\d{2}))?\s*(am|pm)\b", re.IGNORECASE)
+    candidates: List[str] = []
+    for match in pattern.finditer(text):
+        hour = int(match.group(1))
+        minute = int(match.group(2) or "00")
+        meridiem = match.group(3).lower()
+        if hour == 12:
+            hour = 0
+        if meridiem == "pm":
+            hour += 12
+        candidates.append(f"{hour:02d}:{minute:02d}")
+    # also consider explicit HH:MM without am/pm
+    explicit_pattern = re.compile(r"\b(\d{1,2}):(\d{2})\b")
+    for match in explicit_pattern.finditer(text):
+        hour = int(match.group(1))
+        minute = int(match.group(2))
+        if 0 <= hour < 24:
+            candidates.append(f"{hour:02d}:{minute:02d}")
+    return candidates
+
+
+def _delete_calendar_event(event_id: Optional[str], conversation_id: Optional[str]) -> bool:
+    if not event_id:
+        return False
+    try:
+        resp = requests.delete(f"{CALENDAR_API}/events/{event_id}", timeout=10)
+        if resp.status_code == 404:
+            return False
+        resp.raise_for_status()
+    except Exception as exc:
+        logger.warning("Failed to delete calendar event during reschedule heuristic: %s", exc)
+        return False
+
+    logger.info("Deleted calendar event id=%s for reschedule", event_id)
+    if conversation_id and _LATEST_CREATED_EVENT.get(conversation_id, {}).get("id") == event_id:
+        _LATEST_CREATED_EVENT.pop(conversation_id, None)
+    return True
+
+
+def _maybe_delete_reschedule_conflict(
+    events: List[dict],
+    title: str,
+    date_str: str,
+    new_start: str,
+    action: Optional[dict],
+    user_message: Optional[str],
+    conversation_id: Optional[str],
+) -> None:
+    if not events:
+        return
+
+    original_times: List[str] = []
+    original_times.extend(_extract_time_candidates(user_message))
+    if action:
+        for key in (
+            "original_start_time",
+            "previous_start_time",
+            "old_start_time",
+            "prior_start_time",
+        ):
+            original_times.append(_coerce_time_string(action.get(key)))
+        original_times.extend(_extract_time_candidates(action.get("description")))
+
+    original_set = {time for time in original_times if time}
+    target_title = title.strip().lower()
+    fallback: Optional[str] = None
+
+    for event in events:
+        event_id = event.get("id")
+        if not event_id:
+            continue
+        event_title = (event.get("title") or "").strip().lower()
+        if target_title and event_title and event_title != target_title:
+            continue
+        event_date = event.get("startDate") or event.get("date_of_meeting") or ""
+        if date_str and event_date != date_str:
+            continue
+        event_start = _coerce_time_string(
+            event.get("startTime") or event.get("start_time") or event.get("time")
+        )
+        if not event_start or event_start == new_start:
+            continue
+        if original_set and event_start in original_set:
+            if _delete_calendar_event(event_id, conversation_id):
+                return
+        if not fallback:
+            fallback = event_id
+
+    if fallback:
+        _delete_calendar_event(fallback, conversation_id)
 
 
 def build_app() -> gr.Blocks:
