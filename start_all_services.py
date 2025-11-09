@@ -160,6 +160,24 @@ def main():
                 )
                 if result.returncode == 0:
                     print(f"  {service['name']} completed successfully")
+                    # After a successful build, remove the local DB file so the backend starts with a clean DB.
+                    try:
+                        if sys.platform == "win32":
+                            # Use PowerShell Remove-Item on Windows as requested
+                            rm_cmd = [
+                                "powershell",
+                                "-NoProfile",
+                                "-Command",
+                                "Remove-Item 'backend\\data\\db.json' -ErrorAction SilentlyContinue",
+                            ]
+                        else:
+                            # Fallback for non-Windows systems
+                            rm_cmd = ["rm", "-f", str(PROJECT_ROOT / "backend" / "data" / "db.json")]
+
+                        subprocess.run(rm_cmd, cwd=PROJECT_ROOT, shell=False, check=False)
+                        print("  Removed backend/data/db.json (if it existed)")
+                    except Exception as e:
+                        print(f"  Failed to remove backend/data/db.json: {e}")
                 else:
                     print(f"  {service['name']} failed with exit code {result.returncode}")
                 processes.append(None)  # Don't monitor this process
