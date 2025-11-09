@@ -92,7 +92,6 @@ class JSONDatabase:
 
     def get_all_meetings(self) -> List[Dict[str, Any]]:
         """Get all meetings from the database."""
-<<<<<<< Updated upstream
         db = self._read_db()
         return db.get('meetings', [])
     
@@ -119,14 +118,6 @@ class JSONDatabase:
     
     def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a meeting by ID.
-=======
-        data = self._read_db()
-        return data.get("meetings", [])
-
-    def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> bool:
-        """
-        Update a meeting by ID.
->>>>>>> Stashed changes
         
         Args:
             meeting_id: The meeting ID
@@ -135,7 +126,6 @@ class JSONDatabase:
         Returns:
             Updated meeting dict if found, otherwise None
         """
-<<<<<<< Updated upstream
         db = self._read_db()
         for i, meeting in enumerate(db['meetings']):
             if meeting.get('id') == meeting_id:
@@ -146,34 +136,6 @@ class JSONDatabase:
 
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a task by ID.
-=======
-        data = self._read_db()
-        meetings = data.get("meetings", [])
-        
-        for meeting in meetings:
-            if meeting.get("id") == meeting_id:
-                meeting.update(updates)
-                self._write_db(data)
-                return True
-        
-        return False
-
-    # Task operations
-    def add_tasks(self, tasks: List[Dict[str, Any]]) -> None:
-        """Add multiple tasks to the database."""
-        data = self._read_db()
-        data["tasks"].extend(tasks)
-        self._write_db(data)
-
-    def get_all_tasks(self) -> List[Dict[str, Any]]:
-        """Get all tasks from the database."""
-        data = self._read_db()
-        return data.get("tasks", [])
-
-    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
-        """
-        Update a task by ID.
->>>>>>> Stashed changes
         
         Args:
             task_id: The task ID
@@ -182,7 +144,6 @@ class JSONDatabase:
         Returns:
             Updated task dict if found, otherwise None
         """
-<<<<<<< Updated upstream
         db = self._read_db()
         for i, task in enumerate(db['tasks']):
             if task.get('id') == task_id:
@@ -192,17 +153,7 @@ class JSONDatabase:
         return None
     
     def delete_meeting(self, meeting_id: str) -> bool:
-        """Delete a meeting by ID.
-=======
-        data = self._read_db()
-        tasks = data.get("tasks", [])
-        
-        for task in tasks:
-            if task.get("id") == task_id:
-                task.update(updates)
-                self._write_db(data)
-                return True
->>>>>>> Stashed changes
+        """Delete a meeting by ID."""
         
         return False
 
