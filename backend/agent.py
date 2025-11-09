@@ -2,8 +2,6 @@ import os
 import sys
 from pathlib import Path
 import json
-import re
-import uuid
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -47,6 +45,8 @@ def master_agent() -> None:
     
     # Initialize database
     db = get_default_db()
+    db.clear_all()
+    print("Cleared existing meetings/tasks from database.")
 
     try:
         client = _create_openai_client()

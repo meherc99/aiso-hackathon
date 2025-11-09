@@ -1,10 +1,9 @@
 import React from 'react'
-import { getCategoryById } from '../store/events'
 
-export default function EventDetailModal({ event, onClose, onEdit, onDelete, onToggleDone }) {
+export default function EventDetailModal({ event, categoryMap = {}, onClose, onEdit, onDelete, onToggleDone }) {
   if (!event) return null
 
-  const category = getCategoryById(event.category)
+  const category = event?.category ? categoryMap[event.category] : null
 
   function handleEdit() {
     onEdit(event)

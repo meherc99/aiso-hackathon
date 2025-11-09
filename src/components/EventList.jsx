@@ -1,7 +1,6 @@
 import React from 'react'
-import { getCategoryById } from '../store/events'
 
-export default function EventList({ events, onEdit, onDelete, onToggleDone, onViewEvent }) {
+export default function EventList({ events, categoryMap = {}, onEdit, onDelete, onToggleDone, onViewEvent }) {
   const sorted = [...events].sort((a,b) => new Date(a.startDate) - new Date(b.startDate))
   return (
     <div className="event-list">
@@ -9,7 +8,7 @@ export default function EventList({ events, onEdit, onDelete, onToggleDone, onVi
       {sorted.length === 0 && <p>No events yet</p>}
       <ul>
         {sorted.map(ev => {
-          const category = getCategoryById(ev.category)
+          const category = ev?.category ? categoryMap[ev.category] : null
           return (
             <li key={ev.id} className={ev.done ? 'done' : ''}>
               <div className="ev-main" onClick={() => onViewEvent && onViewEvent(ev)} style={{ cursor: 'pointer' }}>
