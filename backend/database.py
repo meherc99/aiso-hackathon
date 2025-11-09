@@ -1,152 +1,98 @@
 """
 database.py
 
-Simple JSON-based file database for storing meetings and tasks.
-Uses a single JSON file with two collections: "meetings" and "tasks".
-Each item is stored with its full JSON object including id, category, etc.
+Provides a simple JSON file-based database for meetings and tasks.
+All timestamps are stored in UTC but can be displayed in Amsterdam time.
 """
 
 import json
 import os
+from datetime import datetime, timezone, timedelta
+from zoneinfo import ZoneInfo
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime, timedelta
+
+# Amsterdam timezone
+AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 
 
-class Database:
+class JSONDatabase:
     """Simple JSON file-based database for meetings and tasks."""
-    
-    def __init__(self, db_path: Optional[str] = None):
-        """Initialize database with a file path.
+
+    def __init__(self, db_path: str = "data/db.json"):
+        """
+        Initialize the database.
         
         Args:
-            db_path: Path to JSON database file. Defaults to backend/data/db.json
+            db_path: Path to the JSON database file
         """
-        if db_path is None:
-            # Default to backend/data/db.json
-            backend_dir = Path(__file__).parent
-            data_dir = backend_dir / "data"
-            data_dir.mkdir(exist_ok=True)
-            db_path = str(data_dir / "db.json")
-        
-        self.db_path = db_path
+        self.db_path = Path(db_path)
         self._ensure_db_exists()
-    
+
     def _ensure_db_exists(self) -> None:
-        """Create empty database file if it doesn't exist."""
-        if not os.path.exists(self.db_path):
-            initial_data = {
+        """Create the database file and directory if they don't exist."""
+        self.db_path.parent.mkdir(parents=True, exist_ok=True)
+        if not self.db_path.exists():
+            self._write_db({
                 "meetings": [],
                 "tasks": [],
-                "channel_timestamps": {},  # New: track last processed time per channel
-                "metadata": {
-                    "created_at": datetime.utcnow().isoformat(),
-                    "last_modified": datetime.utcnow().isoformat()
-                }
-            }
-            with open(self.db_path, 'w', encoding='utf-8') as f:
-                json.dump(initial_data, f, indent=2, ensure_ascii=False)
-    
+                "channel_timestamps": {}
+            })
+
     def _read_db(self) -> Dict[str, Any]:
-        """Read and return the entire database."""
-        with open(self.db_path, 'r', encoding='utf-8') as f:
-            data = json.load(f)
-            # Ensure channel_timestamps exists (backward compatibility)
-            if 'channel_timestamps' not in data:
-                data['channel_timestamps'] = {}
-            return data
-    
+        """Read the entire database."""
+        try:
+            with open(self.db_path, 'r', encoding='utf-8') as f:
+                return json.load(f)
+        except (json.JSONDecodeError, FileNotFoundError):
+            return {"meetings": [], "tasks": [], "channel_timestamps": {}}
+
     def _write_db(self, data: Dict[str, Any]) -> None:
-        """Write data to database file."""
-        data["metadata"]["last_modified"] = datetime.utcnow().isoformat()
+        """Write the entire database."""
         with open(self.db_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
-    
+
+    # Channel timestamp management
     def get_channel_last_processed(self, channel_id: str) -> Optional[str]:
-        """Get the last processed timestamp for a channel.
-        
-        Args:
-            channel_id: The Slack channel ID
-            
-        Returns:
-            ISO format timestamp string or None if never processed
-        """
-        db = self._read_db()
-        return db.get('channel_timestamps', {}).get(channel_id)
-    
+        """Get the last processed timestamp for a channel."""
+        data = self._read_db()
+        return data.get("channel_timestamps", {}).get(channel_id)
+
     def update_channel_timestamp(self, channel_id: str, timestamp: Optional[str] = None) -> None:
-        """Update the last processed timestamp for a channel.
+        """
+        Update the last processed timestamp for a channel.
         
         Args:
             channel_id: The Slack channel ID
-            timestamp: ISO format timestamp. If None, uses current time.
+            timestamp: ISO format timestamp. If None, uses current time in Amsterdam timezone.
         """
-        db = self._read_db()
-        if 'channel_timestamps' not in db:
-            db['channel_timestamps'] = {}
+        data = self._read_db()
+        if "channel_timestamps" not in data:
+            data["channel_timestamps"] = {}
         
         if timestamp is None:
-            timestamp = datetime.utcnow().isoformat()
+            # Use current Amsterdam time
+            now = datetime.now(AMSTERDAM_TZ)
+            timestamp = now.isoformat()
         
-        db['channel_timestamps'][channel_id] = timestamp
-        self._write_db(db)
-    
+        data["channel_timestamps"][channel_id] = timestamp
+        self._write_db(data)
+
     def initialize_channel_timestamp_yesterday(self, channel_id: str) -> None:
-        """Initialize a channel's timestamp to yesterday (for first-time processing).
-        
-        Args:
-            channel_id: The Slack channel ID
-        """
-        yesterday = datetime.utcnow() - timedelta(days=1)
+        """Initialize a channel's timestamp to yesterday (Amsterdam time)."""
+        yesterday = datetime.now(AMSTERDAM_TZ) - timedelta(days=1)
         self.update_channel_timestamp(channel_id, yesterday.isoformat())
-        print(f"Initialized channel {channel_id} with timestamp: {yesterday.isoformat()}")
-    
-    def add_meeting(self, meeting: Dict[str, Any]) -> None:
-        """Add a meeting to the database.
-        
-        Args:
-            meeting: Meeting object with at least 'id' and 'category' fields
-        """
-        db = self._read_db()
-        # Check if meeting with this id already exists
-        existing_ids = {m.get('id') for m in db['meetings']}
-        if meeting.get('id') not in existing_ids:
-            db['meetings'].append(meeting)
-            self._write_db(db)
-    
-    def add_task(self, task: Dict[str, Any]) -> None:
-        """Add a task to the database.
-        
-        Args:
-            task: Task object with at least 'id' and 'category' fields
-        """
-        db = self._read_db()
-        # Check if task with this id already exists
-        existing_ids = {t.get('id') for t in db['tasks']}
-        if task.get('id') not in existing_ids:
-            db['tasks'].append(task)
-            self._write_db(db)
-    
+
+    # Meeting operations
     def add_meetings(self, meetings: List[Dict[str, Any]]) -> None:
-        """Add multiple meetings to the database.
-        
-        Args:
-            meetings: List of meeting objects
-        """
-        for meeting in meetings:
-            self.add_meeting(meeting)
-    
-    def add_tasks(self, tasks: List[Dict[str, Any]]) -> None:
-        """Add multiple tasks to the database.
-        
-        Args:
-            tasks: List of task objects
-        """
-        for task in tasks:
-            self.add_task(task)
-    
+        """Add multiple meetings to the database."""
+        data = self._read_db()
+        data["meetings"].extend(meetings)
+        self._write_db(data)
+
     def get_all_meetings(self) -> List[Dict[str, Any]]:
         """Get all meetings from the database."""
+<<<<<<< Updated upstream
         db = self._read_db()
         return db.get('meetings', [])
     
@@ -173,14 +119,23 @@ class Database:
     
     def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a meeting by ID.
+=======
+        data = self._read_db()
+        return data.get("meetings", [])
+
+    def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> bool:
+        """
+        Update a meeting by ID.
+>>>>>>> Stashed changes
         
         Args:
-            meeting_id: ID of the meeting to update
+            meeting_id: The meeting ID
             updates: Dictionary of fields to update
             
         Returns:
             Updated meeting dict if found, otherwise None
         """
+<<<<<<< Updated upstream
         db = self._read_db()
         for i, meeting in enumerate(db['meetings']):
             if meeting.get('id') == meeting_id:
@@ -191,14 +146,43 @@ class Database:
 
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a task by ID.
+=======
+        data = self._read_db()
+        meetings = data.get("meetings", [])
+        
+        for meeting in meetings:
+            if meeting.get("id") == meeting_id:
+                meeting.update(updates)
+                self._write_db(data)
+                return True
+        
+        return False
+
+    # Task operations
+    def add_tasks(self, tasks: List[Dict[str, Any]]) -> None:
+        """Add multiple tasks to the database."""
+        data = self._read_db()
+        data["tasks"].extend(tasks)
+        self._write_db(data)
+
+    def get_all_tasks(self) -> List[Dict[str, Any]]:
+        """Get all tasks from the database."""
+        data = self._read_db()
+        return data.get("tasks", [])
+
+    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
+        """
+        Update a task by ID.
+>>>>>>> Stashed changes
         
         Args:
-            task_id: ID of the task to update
+            task_id: The task ID
             updates: Dictionary of fields to update
             
         Returns:
             Updated task dict if found, otherwise None
         """
+<<<<<<< Updated upstream
         db = self._read_db()
         for i, task in enumerate(db['tasks']):
             if task.get('id') == task_id:
@@ -209,70 +193,48 @@ class Database:
     
     def delete_meeting(self, meeting_id: str) -> bool:
         """Delete a meeting by ID.
+=======
+        data = self._read_db()
+        tasks = data.get("tasks", [])
         
-        Args:
-            meeting_id: ID of the meeting to delete
-            
-        Returns:
-            True if meeting was found and deleted, False otherwise
-        """
-        db = self._read_db()
-        initial_len = len(db['meetings'])
-        db['meetings'] = [m for m in db['meetings'] if m.get('id') != meeting_id]
-        if len(db['meetings']) < initial_len:
-            self._write_db(db)
-            return True
-        return False
-    
-    def delete_task(self, task_id: str) -> bool:
-        """Delete a task by ID.
+        for task in tasks:
+            if task.get("id") == task_id:
+                task.update(updates)
+                self._write_db(data)
+                return True
+>>>>>>> Stashed changes
         
-        Args:
-            task_id: ID of the task to delete
-            
-        Returns:
-            True if task was found and deleted, False otherwise
-        """
-        db = self._read_db()
-        initial_len = len(db['tasks'])
-        db['tasks'] = [t for t in db['tasks'] if t.get('id') != task_id]
-        if len(db['tasks']) < initial_len:
-            self._write_db(db)
-            return True
         return False
-    
+
     def clear_all(self) -> None:
-        """Clear all meetings and tasks from the database."""
-        db = self._read_db()
-        db['meetings'] = []
-        db['tasks'] = []
-        self._write_db(db)
+        """Clear all data from the database."""
+        self._write_db({
+            "meetings": [],
+            "tasks": [],
+            "channel_timestamps": {}
+        })
 
 
-# Convenience functions for quick access
+# Default database instance
 _default_db = None
 
-def get_default_db() -> Database:
+
+def get_default_db() -> JSONDatabase:
     """Get or create the default database instance."""
     global _default_db
     if _default_db is None:
-        _default_db = Database()
+        _default_db = JSONDatabase()
     return _default_db
 
 
 if __name__ == "__main__":
-    # Demo usage
-    db = Database()
+    # Test the database
+    db = get_default_db()
     
-    # Example: Initialize a channel timestamp to yesterday
-    test_channel_id = "C09S2FM7TND"
-    db.initialize_channel_timestamp_yesterday(test_channel_id)
+    print("Database initialized")
+    print(f"Meetings: {len(db.get_all_meetings())}")
+    print(f"Tasks: {len(db.get_all_tasks())}")
     
-    # Check the timestamp
-    last_processed = db.get_channel_last_processed(test_channel_id)
-    print(f"\nChannel {test_channel_id} last processed: {last_processed}")
-    
-    # Update to current time
-    db.update_channel_timestamp(test_channel_id)
-    last_processed = db.get_channel_last_processed(test_channel_id)
-    print(f"Channel {test_channel_id} updated to: {last_processed}")
+    # Show current Amsterdam time
+    now_amsterdam = datetime.now(AMSTERDAM_TZ)
+    print(f"\nCurrent Amsterdam time: {now_amsterdam.strftime('%Y-%m-%d %H:%M:%S %Z')}")

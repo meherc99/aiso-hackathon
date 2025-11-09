@@ -17,6 +17,8 @@ Notes / assumptions:
 import json
 import re
 from typing import Any, Dict, List, Union, Tuple
+from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
 
 # Import Slack message fetcher
 try:
@@ -68,12 +70,19 @@ def parse_message(raw: Union[str, Dict[str, Any]]) -> Union[Dict[str, Any], None
     return out
 
 
+import re
+from datetime import datetime, timezone
+from typing import List, Dict, Any, Union, Tuple
+from zoneinfo import ZoneInfo
+
+
 def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> Tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
     """Parse a list of messages, normalize and sort them.
 
     Returns a tuple: (final_list, mentioned_list)
       - final_list: list of dicts with keys 'username', 'message', and optional 'send_time'
       - mentioned_list: subset of final_list where the message contains a Slack mention (<@USERID>)
+      - Discards any messages containing 'Upcoming Meeting Reminder' (case-insensitive)
     """
     parsed: List[Dict[str, Any]] = []
     for raw in messages:
@@ -81,7 +90,7 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> Tuple[Lis
         if p is not None:
             parsed.append(p)
 
-    # Sort by numeric timestamp (send_time is a string like '1762611979.560459')
+    # Sort by numeric timestamp
     try:
         parsed.sort(key=lambda x: float(x.get('send_time', 0)))
     except Exception:
@@ -93,13 +102,23 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> Tuple[Lis
         username = item.get('username')
         message = item.get('message')
         currTimestamp = item.get('send_time')
+
+        local_timestamp = None
+        if currTimestamp is not None:
+            try:
+                dt_utc = datetime.fromtimestamp(float(currTimestamp), tz=timezone.utc)
+                dt_local = dt_utc.astimezone(ZoneInfo("Europe/Amsterdam"))
+                local_timestamp = dt_local.isoformat(timespec="seconds")
+            except Exception:
+                local_timestamp = currTimestamp
+
         entry: Dict[str, Any] = {}
         if username is not None:
             entry['username'] = username
         if message is not None:
             entry['message'] = message
-        if currTimestamp is not None:
-            entry['send_time'] = currTimestamp
+        if local_timestamp is not None:
+            entry['send_time'] = local_timestamp
         if entry:
             final.append(entry)
 
@@ -111,5 +130,13 @@ def parse_messages_list(messages: List[Union[str, Dict[str, Any]]]) -> Tuple[Lis
         msg = entry.get('message', '')
         if msg and mention_pattern.search(msg) and task_pattern.search(msg):
             mentioned.append(entry.copy())
+
+    # Remove duplicates from final (those already in mentioned)
+    final = [f for f in final if f not in mentioned]
+
+    # 🚫 Discard any entries containing "Upcoming Meeting Reminder"
+    discard_pattern = re.compile(r'upcoming\s+meeting\s+reminder', re.IGNORECASE)
+    final = [f for f in final if not discard_pattern.search(f.get('message', ''))]
+    mentioned = [m for m in mentioned if not discard_pattern.search(m.get('message', ''))]
 
     return final, mentioned

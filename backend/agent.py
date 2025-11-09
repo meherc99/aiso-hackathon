@@ -123,6 +123,7 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
                     print(f"ERROR: Exception during meeting check: {exc}", file=sys.stderr)
                     meetings_result = []
                 if meetings_result:
+<<<<<<< Updated upstream
                     try:
                         db.add_meetings(meetings_result)
                         result['meetings_count'] = len(meetings_result)
@@ -131,6 +132,18 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
                         print(f"WARNING: Error adding meetings to database for channel {channel_id}: {exc}", file=sys.stderr)
             except Exception as exc:
                 print(f"WARNING: Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+=======
+                    # Add channel_id to each meeting so we know where to send notifications
+                    for meeting in meetings_result:
+                        meeting['channel_id'] = channel_id
+                        meeting['notified'] = False  # Track if we've sent a notification
+                    
+                    db.add_meetings(meetings_result)
+                    result['meetings_count'] = len(meetings_result)
+                    print(f"Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
+            except Exception as exc:
+                print(f"Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+>>>>>>> Stashed changes
         
         # Check for tasks (only from mentions)
         if mentions:
@@ -138,11 +151,19 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
             try:
                 tasks_result = check_for_tasks(mentions, client)
                 if tasks_result:
+                    # Add channel_id to tasks as well
+                    for task in tasks_result:
+                        task['channel_id'] = channel_id
+                    
                     db.add_tasks(tasks_result)
                     result['tasks_count'] = len(tasks_result)
                     print(f"Persisted {len(tasks_result)} task(s) from channel {channel_id}")
             except Exception as exc:
+<<<<<<< Updated upstream
                 print(f"WARNING: Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
+=======
+                print(f"Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
+>>>>>>> Stashed changes
         else:
             print(f"No mentions found in new messages from channel {channel_id}")
         
@@ -199,7 +220,11 @@ def master_agent() -> None:
     
     # Print summary
     print("\n" + "="*70)
+<<<<<<< Updated upstream
     print(" PROCESSING SUMMARY")
+=======
+    print("PROCESSING SUMMARY")
+>>>>>>> Stashed changes
     print("="*70)
     
     total_meetings = sum(r['meetings_count'] for r in results)
@@ -212,13 +237,21 @@ def master_agent() -> None:
     print(f"Errors encountered: {len(errors)}")
     
     if errors:
+<<<<<<< Updated upstream
         print("\nWARNING: Channels with errors:")
+=======
+        print("\nChannels with errors:")
+>>>>>>> Stashed changes
         for r in errors:
             print(f"  - {r['channel_id']}: {r['error']}")
     
     # Show database contents
     print("\n" + "="*70)
+<<<<<<< Updated upstream
     print(" DATABASE VERIFICATION")
+=======
+    print("DATABASE VERIFICATION")
+>>>>>>> Stashed changes
     print("="*70)
     all_meetings = db.get_all_meetings()
     all_tasks = db.get_all_tasks()
