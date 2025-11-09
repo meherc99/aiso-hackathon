@@ -108,8 +108,8 @@ class FriendlyAIWrapper:
     def _fallback_reply(user_message: str) -> str:
         """Simple templated reply when the AI client is unavailable."""
         return (
-            "✨ Thanks for the update! I’m keeping things friendly on my end. "
-            f"You mentioned: “{user_message}”. How else can I support you?"
+            "Thanks for the update! I'm keeping things friendly on my end. ",
+            f"You mentioned: \"{user_message}\". How else can I support you?"
         )
 
 

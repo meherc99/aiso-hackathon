@@ -121,9 +121,9 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
                 if meetings_result:
                     db.add_meetings(meetings_result)
                     result['meetings_count'] = len(meetings_result)
-                    print(f"✅ Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
+                    print(f"Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
             except Exception as exc:
-                print(f"⚠️  Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+                print(f"WARNING: Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
         
         # Check for tasks (only from mentions)
         if mentions:
@@ -133,9 +133,9 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
                 if tasks_result:
                     db.add_tasks(tasks_result)
                     result['tasks_count'] = len(tasks_result)
-                    print(f"✅ Persisted {len(tasks_result)} task(s) from channel {channel_id}")
+                    print(f"Persisted {len(tasks_result)} task(s) from channel {channel_id}")
             except Exception as exc:
-                print(f"⚠️  Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
+                print(f"WARNING: Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
         else:
             print(f"No mentions found in new messages from channel {channel_id}")
         
@@ -144,10 +144,10 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
             from datetime import datetime
             dt = datetime.fromtimestamp(float(latest_message_ts), tz=timezone.utc)
             db.update_channel_timestamp(channel_id, dt.isoformat())
-            print(f"✅ Updated channel timestamp to: {dt.isoformat()}")
+            print(f"Updated channel timestamp to: {dt.isoformat()}")
         else:
             db.update_channel_timestamp(channel_id)
-            print(f"✅ Updated channel timestamp")
+            print(f"Updated channel timestamp")
         
         return result
         
@@ -205,7 +205,7 @@ def master_agent() -> None:
     print(f"Errors encountered: {len(errors)}")
     
     if errors:
-        print("\n⚠️  Channels with errors:")
+        print("\nWARNING: Channels with errors:")
         for r in errors:
             print(f"  - {r['channel_id']}: {r['error']}")
     

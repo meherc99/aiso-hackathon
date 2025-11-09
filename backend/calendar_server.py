@@ -269,13 +269,13 @@ def main():
     port = int(os.environ.get("CALENDAR_PORT", 5050))
     debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
     
-    print(f"🚀 Calendar Server starting on http://localhost:{port}")
-    print(f"📊 API available at http://localhost:{port}/api/events")
+    print(f"Calendar Server starting on http://localhost:{port}")
+    print(f"API available at http://localhost:{port}/api/events")
     
     if STATIC_DIR.exists():
-        print(f"📱 React app available at http://localhost:{port}/")
+        print(f"React app available at http://localhost:{port}/")
     else:
-        print(f"⚠️  React app not built. Run 'npm run build' in src/ directory")
+        print(f"WARNING: React app not built. Run 'npm run build' in src/ directory")
     
     app.run(host="0.0.0.0", port=port, debug=debug)
 

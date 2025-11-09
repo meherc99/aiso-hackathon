@@ -37,7 +37,7 @@ export default function EventDetailModal({ event, categoryMap = {}, onClose, onE
             onClick={onClose}
             aria-label="Close"
           >
-            ✕
+            X
           </button>
         </div>
 
@@ -101,7 +101,7 @@ export default function EventDetailModal({ event, categoryMap = {}, onClose, onE
                 onClick={handleToggleDone}
                 className={`status-btn ${event.done ? 'done' : 'pending'}`}
               >
-                {event.done ? '✓ Completed' : '○ Pending'}
+                {event.done ? 'Completed' : 'Pending'}
               </button>
             </p>
           </div>
@@ -118,10 +118,10 @@ export default function EventDetailModal({ event, categoryMap = {}, onClose, onE
 
         <div className="modal-footer">
           <button onClick={handleEdit} className="btn">
-            ✎ Edit
+            Edit
           </button>
           <button onClick={handleDelete} className="btn delete-btn">
-            🗑 Delete
+            Delete
           </button>
         </div>
       </div>

@@ -413,7 +413,7 @@ def run_agent_background(conversation_id: Optional[str]) -> Tuple[str, str]:
     # Return status message
     status_message = """
     <div style="padding: 20px; text-align: center; background: linear-gradient(135deg, #0066ff22 0%, #00ccff22 100%); border-radius: 12px; border: 2px solid #0066ff44;">
-        <h3 style="color: #0066ff; margin: 0 0 10px 0;">🚀 AI Agent Running</h3>
+        <h3 style="color: #0066ff; margin: 0 0 10px 0;">AI Agent Running</h3>
         <p style="margin: 0; color: #666;">Processing Slack messages and extracting meetings/tasks...</p>
         <p style="margin: 10px 0 0 0; font-size: 0.9em; color: #999;">This may take a few minutes. Results will appear when complete.</p>
     </div>
@@ -582,7 +582,7 @@ def build_app() -> gr.Blocks:
                                 max_lines=3,
                                 scale=9,
                             )
-                            send = gr.Button("➤", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
+                            send = gr.Button("Send", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
 
                     with gr.Column(scale=2, min_width=260):
                         initial_schedule = render_schedule(get_todays_events(None))
