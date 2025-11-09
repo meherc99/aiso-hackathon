@@ -1,8 +1,7 @@
 """
-Combined scheduler: runs agent every minute and meeting reminders every 5 minutes.
-Uses threading to prevent timeouts and allow concurrent execution.
-Meeting reminders only start after the first agent run completes.
-All times displayed in Amsterdam timezone.
+Master scheduler that runs the Slack agent and, after it finishes, the reminder check.
+Both steps are executed sequentially inside a background thread so the scheduler loop
+remains responsive. All timestamps are shown in Amsterdam time.
 """
 import schedule
 import time
@@ -13,66 +12,41 @@ from zoneinfo import ZoneInfo
 from agent import master_agent
 from check_upcoming_and_notify import main as check_and_notify
 
-# Amsterdam timezone
 AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 
-# Flag to track if agent has run at least once
-agent_has_run = threading.Event()
 
-
-def run_agent():
-    """Run the agent to process new messages in a separate thread."""
+def run_cycle():
+    """Run the agent followed immediately by the reminder check."""
     def execute():
-        now = datetime.now(AMSTERDAM_TZ)
+        cycle_start = datetime.now(AMSTERDAM_TZ)
         print(f"\n{'='*70}")
-        print(f"Running agent at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print(f"Starting cycle at {cycle_start.strftime('%Y-%m-%d %H:%M:%S %Z')}")
         print(f"{'='*70}\n")
+
+        # Step 1: run the agent (adds meetings/tasks to the database)
         try:
+            print(f"Running agent...")
             master_agent()
-            now = datetime.now(AMSTERDAM_TZ)
-            print(f"\nAgent completed at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n")
-            # Signal that agent has completed at least once
-            if not agent_has_run.is_set():
-                agent_has_run.set()
-                # Run reminder check immediately after first agent run
-                print("First agent run completed - running initial reminder check...")
-                run_reminder_check()
-        except Exception as e:
-            now = datetime.now(AMSTERDAM_TZ)
-            print(f"\nAgent failed at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}: {e}\n", file=sys.stderr)
-    
-    # Run in separate thread to avoid blocking
-    thread = threading.Thread(target=execute, daemon=True)
-    thread.start()
+            print(f"Agent finished at {datetime.now(AMSTERDAM_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        except Exception as exc:
+            print(f"Agent failed: {exc}", file=sys.stderr)
+            return  # Skip reminder if agent failed
 
-
-def run_reminder_check():
-    """Check for upcoming meetings and send reminders in a separate thread."""
-    def execute():
-        # Wait for agent to run at least once before sending reminders
-        if not agent_has_run.is_set():
-            now = datetime.now(AMSTERDAM_TZ)
-            print(f"\n{'='*70}")
-            print(f"Skipping reminder check at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-            print("Waiting for agent to complete first run before sending notifications")
-            print(f"{'='*70}\n")
-            return
-        
-        now = datetime.now(AMSTERDAM_TZ)
-        print(f"\n{'='*70}")
-        print(f"Checking for upcoming meetings at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-        print(f"{'='*70}\n")
+        # Step 2: run reminders (now that DB is up-to-date)
         try:
+            print("Running reminder check...")
             check_and_notify()
-            now = datetime.now(AMSTERDAM_TZ)
-            print(f"\nReminder check completed at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}\n")
-        except Exception as e:
-            now = datetime.now(AMSTERDAM_TZ)
-            print(f"\nReminder check failed at {now.strftime('%Y-%m-%d %H:%M:%S %Z')}: {e}\n", file=sys.stderr)
-    
-    # Run in separate thread to avoid blocking
-    thread = threading.Thread(target=execute, daemon=True)
-    thread.start()
+            print(f"Reminder check completed at {datetime.now(AMSTERDAM_TZ).strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        except Exception as exc:
+            print(f"Reminder check failed: {exc}", file=sys.stderr)
+
+        cycle_end = datetime.now(AMSTERDAM_TZ)
+        print(f"\n{'='*70}")
+        print(f"Cycle completed at {cycle_end.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+        print(f"Total cycle duration: {(cycle_end - cycle_start).total_seconds():.1f}s")
+        print(f"{'='*70}\n")
+
+    threading.Thread(target=execute, daemon=True).start()
 
 
 def main():
@@ -80,19 +54,16 @@ def main():
     now = datetime.now(AMSTERDAM_TZ)
     print("Master Scheduler started")
     print(f"Current Amsterdam time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    print("Agent runs: every 3 minutes (process new Slack messages)")
-    print("Reminder check: every 5 minutes (notify upcoming meetings)")
-    print("Note: Reminders will run immediately after first agent completes, then every 5 minutes")
-    print("Using threaded execution to prevent timeouts")
+    print("Cycle cadence: every 5 minutes (agent runs first, reminders second)")
+    print("Using threaded execution to keep the loop responsive")
     print("\nPress Ctrl+C to stop\n")
-    
-    # Run agent immediately on start
-    run_agent()
-    
-    # Schedule tasks
-    schedule.every(3).minutes.do(run_agent)
-    schedule.every(5).minutes.do(run_reminder_check)
-    
+
+    # Run immediately on start
+    run_cycle()
+
+    # Schedule subsequent cycles
+    schedule.every(5).minutes.do(run_cycle)
+
     # Keep running
     try:
         while True:
@@ -100,7 +71,6 @@ def main():
             time.sleep(1)
     except KeyboardInterrupt:
         print("\n\nMaster scheduler stopped by user")
-        # Give threads time to finish
         print("Waiting for running tasks to complete...")
         time.sleep(2)
         sys.exit(0)

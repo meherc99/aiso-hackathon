@@ -5,6 +5,8 @@ import json
 import re
 import uuid
 from datetime import datetime, timezone
+from zoneinfo import ZoneInfo
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -13,6 +15,9 @@ from check_meetings import check_for_meetings, check_for_tasks
 from parse_messages import parse_messages_list
 from slack import fetch_all_messages, get_user_channels
 from database import get_default_db
+
+# Amsterdam timezone
+AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
 
 
 def _load_env() -> None:
@@ -45,6 +50,7 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
     """
     Process a single channel: fetch messages, check for meetings/tasks, and persist to DB.
     Only processes messages sent after the last processed timestamp for this channel.
+    All timestamps are in Amsterdam timezone.
     
     Args:
         channel_id: The Slack channel ID to process
@@ -68,10 +74,10 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
         # Check if this is the first time processing this channel
         last_processed = db.get_channel_last_processed(channel_id)
         if last_processed is None:
-            # First time - initialize to yesterday
+            # First time - initialize to yesterday (Amsterdam time)
             db.initialize_channel_timestamp_yesterday(channel_id)
             last_processed = db.get_channel_last_processed(channel_id)
-            print(f"First time processing - initialized timestamp to yesterday")
+            print(f"First time processing - initialized timestamp to yesterday (Amsterdam time)")
         else:
             print(f"Last processed: {last_processed}")
         
@@ -83,7 +89,7 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
         
         if not messages:
             print(f"No new messages found in channel {channel_id}")
-            # Update timestamp even if no messages
+            # Update timestamp even if no messages (to Amsterdam time)
             db.update_channel_timestamp(channel_id)
             return result
         
@@ -101,36 +107,47 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
         parsed_messages, mentions = parse_messages_list(messages)
         if not parsed_messages:
             print(f"No valid messages to process in channel {channel_id}")
-            # Update timestamp to the latest message timestamp
+            # Update timestamp to the latest message timestamp (convert to Amsterdam time)
             if latest_message_ts:
-                # Convert Slack timestamp to ISO format
-                from datetime import datetime
+                # Convert Slack timestamp to Amsterdam time
                 dt = datetime.fromtimestamp(float(latest_message_ts), tz=timezone.utc)
-                db.update_channel_timestamp(channel_id, dt.isoformat())
+                dt_amsterdam = dt.astimezone(AMSTERDAM_TZ)
+                db.update_channel_timestamp(channel_id, dt_amsterdam.isoformat())
             else:
                 db.update_channel_timestamp(channel_id)
             return result
         
         print(f"Parsed {len(parsed_messages)} message(s), {len(mentions)} mention(s)")
         
-        # Check for meetings
-        if parsed_messages:
-            print(f"Analyzing {len(parsed_messages)} messages for meetings...")
+        # Separate messages: non-mentions for meetings, mentions for tasks
+        non_mention_messages = [msg for msg in parsed_messages if msg not in mentions]
+        
+        # Check for meetings (only from non-mention messages)
+        if non_mention_messages:
+            print(f"Analyzing {len(non_mention_messages)} non-mention messages for meetings...")
             try:
-                try:
-                    meetings_result = check_for_meetings(parsed_messages, client)
-                except Exception as exc:
-                    print(f"ERROR: Exception during meeting check: {exc}", file=sys.stderr)
-                    meetings_result = []
-                if meetings_result:
-                    try:
-                        db.add_meetings(meetings_result)
-                        result['meetings_count'] = len(meetings_result)
-                        print(f"Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
-                    except Exception as exc:
-                        print(f"WARNING: Error adding meetings to database for channel {channel_id}: {exc}", file=sys.stderr)
+                meetings_result = check_for_meetings(non_mention_messages, client)
+                filtered_meetings: List[Dict[str, Any]] = []
+                for meeting in meetings_result or []:
+                    meeting['channel_id'] = channel_id
+                    meeting['notified'] = False
+                    title = meeting.get("title", "")
+                    date_of_meeting = meeting.get("date_of_meeting")
+                    start_time = meeting.get("start_time")
+                    if not (date_of_meeting and start_time):
+                        continue
+                    if db.meeting_exists(channel_id, date_of_meeting, start_time, title):
+                        continue
+                    filtered_meetings.append(meeting)
+
+                if filtered_meetings:
+                    db.add_meetings(filtered_meetings)
+                    result['meetings_count'] = len(filtered_meetings)
+                    print(f"Persisted {len(filtered_meetings)} meeting(s) from channel {channel_id}")
             except Exception as exc:
-                print(f"WARNING: Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+                print(f"Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+        else:
+            print(f"No non-mention messages to check for meetings in channel {channel_id}")
         
         # Check for tasks (only from mentions)
         if mentions:
@@ -146,19 +163,19 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
                     result['tasks_count'] = len(tasks_result)
                     print(f"Persisted {len(tasks_result)} task(s) from channel {channel_id}")
             except Exception as exc:
-                print(f"WARNING: Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
+                print(f"Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
         else:
             print(f"No mentions found in new messages from channel {channel_id}")
         
-        # Update the channel's last processed timestamp to the latest message timestamp
+        # Update the channel's last processed timestamp to the latest message timestamp (Amsterdam time)
         if latest_message_ts:
-            from datetime import datetime
             dt = datetime.fromtimestamp(float(latest_message_ts), tz=timezone.utc)
-            db.update_channel_timestamp(channel_id, dt.isoformat())
-            print(f"Updated channel timestamp to: {dt.isoformat()}")
+            dt_amsterdam = dt.astimezone(AMSTERDAM_TZ)
+            db.update_channel_timestamp(channel_id, dt_amsterdam.isoformat())
+            print(f"Updated channel timestamp to: {dt_amsterdam.isoformat()}")
         else:
             db.update_channel_timestamp(channel_id)
-            print(f"Updated channel timestamp")
+            print(f"Updated channel timestamp to current Amsterdam time")
         
         return result
         
@@ -203,7 +220,7 @@ def master_agent() -> None:
     
     # Print summary
     print("\n" + "="*70)
-    print(" PROCESSING SUMMARY")
+    print("PROCESSING SUMMARY")
     print("="*70)
     
     total_meetings = sum(r['meetings_count'] for r in results)
@@ -216,31 +233,39 @@ def master_agent() -> None:
     print(f"Errors encountered: {len(errors)}")
     
     if errors:
-        print("\nWARNING: Channels with errors:")
+        print("\nChannels with errors:")
         for r in errors:
             print(f"  - {r['channel_id']}: {r['error']}")
     
     # Show database contents
     print("\n" + "="*70)
-    print(" DATABASE VERIFICATION")
+    print("DATABASE VERIFICATION")
     print("="*70)
     all_meetings = db.get_all_meetings()
     all_tasks = db.get_all_tasks()
     print(f"Total meetings in DB: {len(all_meetings)}")
     print(f"Total tasks in DB: {len(all_tasks)}")
     
-    # Show channel timestamps
+    # Show channel timestamps (in Amsterdam time)
     db_data = db._read_db()
     channel_timestamps = db_data.get('channel_timestamps', {})
     if channel_timestamps:
-        print(f"\nChannel timestamps:")
+        print(f"\nChannel timestamps (Amsterdam time):")
         for ch_id, ts in channel_timestamps.items():
-            print(f"  - {ch_id}: {ts}")
+            try:
+                dt = datetime.fromisoformat(ts)
+                if dt.tzinfo is None:
+                    dt = dt.replace(tzinfo=AMSTERDAM_TZ)
+                else:
+                    dt = dt.astimezone(AMSTERDAM_TZ)
+                print(f"  - {ch_id}: {dt.strftime('%Y-%m-%d %H:%M:%S %Z')}")
+            except:
+                print(f"  - {ch_id}: {ts}")
     
     if all_meetings:
         print("\nLatest meetings:")
         for m in all_meetings[-5:]:  # Show last 5
-            print(f"  - {m.get('title')} on {m.get('date_of_meeting')}")
+            print(f"  - {m.get('title')} on {m.get('date_of_meeting')} at {m.get('start_time')}")
     
     if all_tasks:
         print("\nLatest tasks:")
