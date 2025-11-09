@@ -1,8 +1,9 @@
 import html
+import logging
 import os
 from typing import Any, List, Optional, Tuple
 
-from datetime import datetime, date
+from datetime import datetime, date, timedelta
 
 import gradio as gr
 import requests
@@ -11,6 +12,7 @@ from chat_logic import Message, build_bot_reply, messages_to_history
 from storage import ConversationStore
 
 store = ConversationStore()
+logger = logging.getLogger(__name__)
 CALENDAR_API = os.getenv("VITE_CALENDAR_API", "http://localhost:5050/api")
 
 PANEL_CSS = """
@@ -218,6 +220,116 @@ def fetch_task_list(_: Optional[str]) -> List[dict]:
     return tasks
 
 
+def _add_one_hour(start_time: str) -> str:
+    try:
+        base = datetime.strptime(start_time, "%H:%M")
+    except ValueError:
+        base = datetime.strptime("09:00", "%H:%M")
+    end = base + timedelta(hours=1)
+    return end.strftime("%H:%M")
+
+
+def _normalise_time(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    try:
+        datetime.strptime(value, "%H:%M")
+        return value
+    except ValueError:
+        return None
+
+
+def apply_calendar_action(action: Optional[dict]) -> Optional[str]:
+    if not action or action.get("action") in (None, "none"):
+        return None
+
+    action_type = action.get("action")
+
+    if action_type == "create":
+        date_str = (action.get("date") or action.get("date_of_meeting") or "").strip()
+        if not date_str:
+            logger.debug("Calendar action create ignored: missing date in %s", action)
+            return "⚠️ I couldn’t schedule that meeting because no date was given."
+
+        start_time = _normalise_time(action.get("start_time") or action.get("startTime"))
+        if not start_time:
+            start_time = "09:00"
+        end_time = _normalise_time(action.get("end_time") or action.get("endTime"))
+        if not end_time:
+            end_time = _add_one_hour(start_time)
+
+        title = (action.get("title") or "Meeting").strip() or "Meeting"
+        description = (action.get("description") or "").strip()
+        payload = {
+            "title": title,
+            "description": description,
+            "startDate": date_str,
+            "endDate": date_str,
+            "startTime": start_time,
+            "endTime": end_time,
+            "category": action.get("category") or "work",
+        }
+
+        try:
+            resp = requests.post(f"{CALENDAR_API}/events", json=payload, timeout=10)
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Failed to create calendar event: %s", exc)
+            return "⚠️ I tried to add that meeting but something went wrong."
+
+        logger.info("Created calendar event: %s", payload)
+        return f"✅ Scheduled “{title}” on {date_str} at {start_time}."
+
+    if action_type == "delete":
+        try:
+            events = fetch_calendar_events(None)
+        except Exception:
+            events = []
+
+        candidate_id = action.get("event_id") or action.get("id")
+        title_hint = (action.get("title") or "").strip().lower()
+        date_hint = (action.get("date") or action.get("date_of_meeting") or "").strip()
+        time_hint = (action.get("start_time") or action.get("startTime") or "").strip()
+
+        if not candidate_id:
+            for event in events:
+                event_title = (event.get("title") or "").lower()
+                event_date = event.get("startDate") or event.get("date_of_meeting") or ""
+                event_time = event.get("startTime") or event.get("start_time") or ""
+
+                if title_hint and title_hint not in event_title:
+                    continue
+                if date_hint and date_hint != event_date:
+                    continue
+                if time_hint and time_hint != event_time:
+                    continue
+                candidate_id = event.get("id")
+                if candidate_id:
+                    break
+
+        if not candidate_id:
+            logger.debug("Calendar delete: fell back to events search, candidate=%s", candidate_id)
+
+        if not candidate_id:
+            logger.debug("Calendar delete ignored: no matching event for %s", action)
+            return "⚠️ I couldn’t find a matching meeting to delete."
+
+        try:
+            resp = requests.delete(f"{CALENDAR_API}/events/{candidate_id}", timeout=10)
+            if resp.status_code == 404:
+                return "⚠️ I couldn’t find a matching meeting to delete."
+            resp.raise_for_status()
+        except Exception as exc:
+            logger.warning("Failed to delete calendar event: %s", exc)
+            return "⚠️ I tried to remove that meeting but something went wrong."
+
+        logger.info("Deleted calendar event id=%s", candidate_id)
+        return "🗑️ Removed the meeting from your calendar."
+
+    return None
+
+
 def render_schedule(events: List[dict]) -> str:
     hours = [f"{hour:02d}:00" for hour in range(8, 18)]
     slots: dict[str, List[str]] = {hour: [] for hour in hours}
@@ -307,7 +419,10 @@ def handle_user_message(
         return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
 
     store.append_message(conversation_id, "user", cleaned)
-    bot_reply = build_bot_reply(cleaned, history)
+    bot_reply, calendar_action = build_bot_reply(cleaned, history)
+    action_feedback = apply_calendar_action(calendar_action)
+    if action_feedback:
+        bot_reply = f"{bot_reply}\n\n{action_feedback}"
     store.append_message(conversation_id, "assistant", bot_reply)
     store.update_title_if_missing(conversation_id, cleaned)
 

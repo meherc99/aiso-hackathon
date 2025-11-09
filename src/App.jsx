@@ -45,6 +45,51 @@ export default function App() {
     }
   }, [])
 
+  useEffect(() => {
+    let stopped = false
+
+    async function refresh() {
+      try {
+        const fetchedEvents = await loadEvents()
+        if (!stopped) {
+          setEvents(Array.isArray(fetchedEvents) ? fetchedEvents : [])
+        }
+      } catch (err) {
+        console.error('Failed to refresh events from API', err)
+      }
+    }
+
+    const handleFocus = () => {
+      refresh()
+    }
+
+    window.addEventListener('focus', handleFocus)
+    const intervalId = setInterval(refresh, 15000)
+
+    return () => {
+      stopped = true
+      window.removeEventListener('focus', handleFocus)
+      clearInterval(intervalId)
+    }
+  }, [])
+
+  useEffect(() => {
+    function hideChatBadge() {
+      document.querySelectorAll('button').forEach(btn => {
+        const label = (btn.textContent || '').trim()
+        if (label === 'Chat') {
+          btn.style.display = 'none'
+        }
+      })
+    }
+
+    hideChatBadge()
+    const observer = new MutationObserver(hideChatBadge)
+    observer.observe(document.body, { childList: true, subtree: true })
+
+    return () => observer.disconnect()
+  }, [])
+
   const categoryMap = useMemo(() => buildCategoryMap(categories, events), [categories, events])
   const categoryOptions = useMemo(() => Object.values(categoryMap), [categoryMap])
 
