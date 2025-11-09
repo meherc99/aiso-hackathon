@@ -171,7 +171,7 @@ class Database:
                 return task
         return None
     
-    def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> bool:
+    def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a meeting by ID.
         
         Args:
@@ -179,17 +179,17 @@ class Database:
             updates: Dictionary of fields to update
             
         Returns:
-            True if meeting was found and updated, False otherwise
+            Updated meeting dict if found, otherwise None
         """
         db = self._read_db()
         for i, meeting in enumerate(db['meetings']):
             if meeting.get('id') == meeting_id:
                 db['meetings'][i].update(updates)
                 self._write_db(db)
-                return True
-        return False
-    
-    def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
+                return db['meetings'][i]
+        return None
+
+    def update_task(self, task_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update a task by ID.
         
         Args:
@@ -197,15 +197,15 @@ class Database:
             updates: Dictionary of fields to update
             
         Returns:
-            True if task was found and updated, False otherwise
+            Updated task dict if found, otherwise None
         """
         db = self._read_db()
         for i, task in enumerate(db['tasks']):
             if task.get('id') == task_id:
                 db['tasks'][i].update(updates)
                 self._write_db(db)
-                return True
-        return False
+                return db['tasks'][i]
+        return None
     
     def delete_meeting(self, meeting_id: str) -> bool:
         """Delete a meeting by ID.
