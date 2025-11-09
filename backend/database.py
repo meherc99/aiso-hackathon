@@ -10,7 +10,7 @@ import json
 import os
 from pathlib import Path
 from typing import List, Dict, Any, Optional
-from datetime import datetime
+from datetime import datetime, timedelta
 
 
 class Database:
@@ -38,6 +38,7 @@ class Database:
             initial_data = {
                 "meetings": [],
                 "tasks": [],
+                "channel_timestamps": {},  # New: track last processed time per channel
                 "metadata": {
                     "created_at": datetime.utcnow().isoformat(),
                     "last_modified": datetime.utcnow().isoformat()
@@ -49,13 +50,56 @@ class Database:
     def _read_db(self) -> Dict[str, Any]:
         """Read and return the entire database."""
         with open(self.db_path, 'r', encoding='utf-8') as f:
-            return json.load(f)
+            data = json.load(f)
+            # Ensure channel_timestamps exists (backward compatibility)
+            if 'channel_timestamps' not in data:
+                data['channel_timestamps'] = {}
+            return data
     
     def _write_db(self, data: Dict[str, Any]) -> None:
         """Write data to database file."""
         data["metadata"]["last_modified"] = datetime.utcnow().isoformat()
         with open(self.db_path, 'w', encoding='utf-8') as f:
             json.dump(data, f, indent=2, ensure_ascii=False)
+    
+    def get_channel_last_processed(self, channel_id: str) -> Optional[str]:
+        """Get the last processed timestamp for a channel.
+        
+        Args:
+            channel_id: The Slack channel ID
+            
+        Returns:
+            ISO format timestamp string or None if never processed
+        """
+        db = self._read_db()
+        return db.get('channel_timestamps', {}).get(channel_id)
+    
+    def update_channel_timestamp(self, channel_id: str, timestamp: Optional[str] = None) -> None:
+        """Update the last processed timestamp for a channel.
+        
+        Args:
+            channel_id: The Slack channel ID
+            timestamp: ISO format timestamp. If None, uses current time.
+        """
+        db = self._read_db()
+        if 'channel_timestamps' not in db:
+            db['channel_timestamps'] = {}
+        
+        if timestamp is None:
+            timestamp = datetime.utcnow().isoformat()
+        
+        db['channel_timestamps'][channel_id] = timestamp
+        self._write_db(db)
+    
+    def initialize_channel_timestamp_yesterday(self, channel_id: str) -> None:
+        """Initialize a channel's timestamp to yesterday (for first-time processing).
+        
+        Args:
+            channel_id: The Slack channel ID
+        """
+        yesterday = datetime.utcnow() - timedelta(days=1)
+        self.update_channel_timestamp(channel_id, yesterday.isoformat())
+        print(f"Initialized channel {channel_id} with timestamp: {yesterday.isoformat()}")
     
     def add_meeting(self, meeting: Dict[str, Any]) -> None:
         """Add a meeting to the database.
@@ -127,7 +171,7 @@ class Database:
                 return task
         return None
     
-    def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+    def update_meeting(self, meeting_id: str, updates: Dict[str, Any]) -> bool:
         """Update a meeting by ID.
         
         Args:
@@ -135,15 +179,15 @@ class Database:
             updates: Dictionary of fields to update
             
         Returns:
-            The updated meeting dictionary if successful, otherwise None.
+            True if meeting was found and updated, False otherwise
         """
         db = self._read_db()
         for i, meeting in enumerate(db['meetings']):
             if meeting.get('id') == meeting_id:
                 db['meetings'][i].update(updates)
                 self._write_db(db)
-                return db['meetings'][i]
-        return None
+                return True
+        return False
     
     def update_task(self, task_id: str, updates: Dict[str, Any]) -> bool:
         """Update a task by ID.
@@ -220,39 +264,15 @@ if __name__ == "__main__":
     # Demo usage
     db = Database()
     
-    # Example meeting
-    sample_meeting = {
-        "id": "test-meeting-1",
-        "category": "work",
-        "date_of_meeting": "2025-11-15",
-        "start_time": "14:00",
-        "end_time": "15:00",
-        "title": "Team Sync",
-        "description": "Weekly team synchronization meeting",
-        "created_at": datetime.utcnow().isoformat(),
-        "done": False
-    }
+    # Example: Initialize a channel timestamp to yesterday
+    test_channel_id = "C09S2FM7TND"
+    db.initialize_channel_timestamp_yesterday(test_channel_id)
     
-    # Example task
-    sample_task = {
-        "id": "test-task-1",
-        "category": "tasks",
-        "date_of_meeting": "2025-11-10",
-        "start_time": "23:59",
-        "end_time": "23:59",
-        "title": "Code Review",
-        "description": "Review PR #123",
-        "created_at": datetime.utcnow().isoformat(),
-        "done": False
-    }
+    # Check the timestamp
+    last_processed = db.get_channel_last_processed(test_channel_id)
+    print(f"\nChannel {test_channel_id} last processed: {last_processed}")
     
-    # Add items
-    db.add_meeting(sample_meeting)
-    db.add_task(sample_task)
-    
-    # Retrieve and print
-    print("All meetings:")
-    print(json.dumps(db.get_all_meetings(), indent=2))
-    
-    print("\nAll tasks:")
-    print(json.dumps(db.get_all_tasks(), indent=2))
+    # Update to current time
+    db.update_channel_timestamp(test_channel_id)
+    last_processed = db.get_channel_last_processed(test_channel_id)
+    print(f"Channel {test_channel_id} updated to: {last_processed}")

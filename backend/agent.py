@@ -2,6 +2,8 @@ import os
 import sys
 from pathlib import Path
 import json
+import re
+import uuid
 from datetime import datetime, timezone
 
 from dotenv import load_dotenv
@@ -42,6 +44,7 @@ def _create_openai_client() -> OpenAI:
 def process_channel(channel_id: str, client: OpenAI, db) -> dict:
     """
     Process a single channel: fetch messages, check for meetings/tasks, and persist to DB.
+    Only processes messages sent after the last processed timestamp for this channel.
     
     Args:
         channel_id: The Slack channel ID to process
@@ -61,34 +64,68 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
     try:
         print(f"\n{'='*70}")
         print(f"Processing channel: {channel_id}")
+        
+        # Check if this is the first time processing this channel
+        last_processed = db.get_channel_last_processed(channel_id)
+        if last_processed is None:
+            # First time - initialize to yesterday
+            db.initialize_channel_timestamp_yesterday(channel_id)
+            last_processed = db.get_channel_last_processed(channel_id)
+            print(f"First time processing - initialized timestamp to yesterday")
+        else:
+            print(f"Last processed: {last_processed}")
+        
         print(f"{'='*70}")
         
-        # Fetch messages from channel
-        print(f"Fetching messages from channel {channel_id}...")
-        messages = fetch_all_messages(channel_id)
+        # Fetch messages from channel AFTER the last processed timestamp
+        print(f"Fetching messages from channel {channel_id} after {last_processed}...")
+        messages = fetch_all_messages(channel_id, oldest_timestamp=last_processed)
         
         if not messages:
-            print(f"No messages found in channel {channel_id}")
+            print(f"No new messages found in channel {channel_id}")
+            # Update timestamp even if no messages
+            db.update_channel_timestamp(channel_id)
             return result
+        
+        # Track the latest message timestamp for updating the database
+        latest_message_ts = None
+        for msg in messages:
+            msg_ts = msg.get('ts')
+            if msg_ts:
+                if latest_message_ts is None or float(msg_ts) > float(latest_message_ts):
+                    latest_message_ts = msg_ts
+        
+        print(f"Found {len(messages)} new message(s)")
         
         # Parse messages
         parsed_messages, mentions = parse_messages_list(messages)
         if not parsed_messages:
             print(f"No valid messages to process in channel {channel_id}")
+            # Update timestamp to the latest message timestamp
+            if latest_message_ts:
+                # Convert Slack timestamp to ISO format
+                from datetime import datetime
+                dt = datetime.fromtimestamp(float(latest_message_ts), tz=timezone.utc)
+                db.update_channel_timestamp(channel_id, dt.isoformat())
+            else:
+                db.update_channel_timestamp(channel_id)
             return result
         
-        # Check for meetings
-        print(f"Analyzing {len(parsed_messages)} messages for meetings...")
-        try:
-            meetings_result = check_for_meetings(parsed_messages, client)
-            if meetings_result:
-                db.add_meetings(meetings_result)
-                result['meetings_count'] = len(meetings_result)
-                print(f"✅ Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
-        except Exception as exc:
-            print(f"⚠️  Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+        print(f"Parsed {len(parsed_messages)} message(s), {len(mentions)} mention(s)")
         
-        # Check for tasks
+        # Check for meetings
+        if parsed_messages:
+            print(f"Analyzing {len(parsed_messages)} messages for meetings...")
+            try:
+                meetings_result = check_for_meetings(parsed_messages, client)
+                if meetings_result:
+                    db.add_meetings(meetings_result)
+                    result['meetings_count'] = len(meetings_result)
+                    print(f"✅ Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
+            except Exception as exc:
+                print(f"⚠️  Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
+        
+        # Check for tasks (only from mentions)
         if mentions:
             print(f"Analyzing {len(mentions)} mentioned messages for tasks...")
             try:
@@ -100,7 +137,17 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
             except Exception as exc:
                 print(f"⚠️  Error checking tasks in channel {channel_id}: {exc}", file=sys.stderr)
         else:
-            print(f"No mentions found in channel {channel_id}")
+            print(f"No mentions found in new messages from channel {channel_id}")
+        
+        # Update the channel's last processed timestamp to the latest message timestamp
+        if latest_message_ts:
+            from datetime import datetime
+            dt = datetime.fromtimestamp(float(latest_message_ts), tz=timezone.utc)
+            db.update_channel_timestamp(channel_id, dt.isoformat())
+            print(f"✅ Updated channel timestamp to: {dt.isoformat()}")
+        else:
+            db.update_channel_timestamp(channel_id)
+            print(f"✅ Updated channel timestamp")
         
         return result
         
@@ -117,8 +164,6 @@ def master_agent() -> None:
     
     # Initialize database
     db = get_default_db()
-    db.clear_all()
-    print("Cleared existing meetings/tasks from database.")
 
     try:
         client = _create_openai_client()
@@ -172,6 +217,14 @@ def master_agent() -> None:
     all_tasks = db.get_all_tasks()
     print(f"Total meetings in DB: {len(all_meetings)}")
     print(f"Total tasks in DB: {len(all_tasks)}")
+    
+    # Show channel timestamps
+    db_data = db._read_db()
+    channel_timestamps = db_data.get('channel_timestamps', {})
+    if channel_timestamps:
+        print(f"\nChannel timestamps:")
+        for ch_id, ts in channel_timestamps.items():
+            print(f"  - {ch_id}: {ts}")
     
     if all_meetings:
         print("\nLatest meetings:")

@@ -8,37 +8,71 @@ load_dotenv()
 
 client = WebClient(token=os.getenv('SLACK_BOT_TOKEN'))
 
-def fetch_all_messages(channel_id):
+def fetch_all_messages(channel_id, oldest_timestamp=None):
     """
-    Fetch all messages from a Slack channel
+    Fetch all messages from a Slack channel, optionally filtering by timestamp.
     
     Args:
-        channel_id: The ID of the channel to fetch messages from
+        channel_id: The Slack channel ID
+        oldest_timestamp: Unix timestamp (float or string). Only fetch messages after this time.
+                         If None, fetches all messages.
     
     Returns:
-        List of all messages from the channel
+        List of message dictionaries, or empty list on error.
     """
-    all_messages = []
-    
     try:
-        # Initial call to conversations.history
-        result = client.conversations_history(channel=channel_id)
-        all_messages.extend(result["messages"])
+        all_messages = []
+        cursor = None
         
-        # Paginate through all messages if there are more
-        while result.get("has_more"):
-            result = client.conversations_history(
-                channel=channel_id,
-                cursor=result["response_metadata"]["next_cursor"]
-            )
-            all_messages.extend(result["messages"])
+        # Prepare API parameters
+        params = {
+            'channel': channel_id,
+            'limit': 100
+        }
         
-        print(f"Successfully fetched {len(all_messages)} messages")
+        # Add timestamp filter if provided
+        if oldest_timestamp is not None:
+            # Convert ISO timestamp to Unix timestamp if needed
+            if isinstance(oldest_timestamp, str):
+                from datetime import datetime
+                try:
+                    dt = datetime.fromisoformat(oldest_timestamp.replace('Z', '+00:00'))
+                    oldest_timestamp = dt.timestamp()
+                except Exception as e:
+                    print(f"Warning: Could not parse timestamp {oldest_timestamp}: {e}", file=sys.stderr)
+                    oldest_timestamp = None
+            
+            if oldest_timestamp is not None:
+                params['oldest'] = str(oldest_timestamp)
+                print(f"Fetching messages after timestamp: {oldest_timestamp}")
+        
+        while True:
+            if cursor:
+                params['cursor'] = cursor
+            
+            response = client.conversations_history(**params)
+            
+            messages = response.get('messages', [])
+            all_messages.extend(messages)
+            
+            # Check if there are more messages
+            if not response.get('has_more', False):
+                break
+            
+            cursor = response.get('response_metadata', {}).get('next_cursor')
+            if not cursor:
+                break
+        
+        print(f"Successfully fetched {len(all_messages)} messages from channel {channel_id}")
         return all_messages
         
     except SlackApiError as e:
-        print(f"Error fetching messages: {e.response['error']}")
+        print(f"Error fetching messages: {e.response['error']}", file=sys.stderr)
         return []
+    except Exception as e:
+        print(f"Unexpected error: {e}", file=sys.stderr)
+        return []
+
 
 def get_user_channels():
     """
@@ -75,43 +109,39 @@ def get_user_channels():
         print(f"Unexpected error fetching channels: {e}", file=sys.stderr)
         return []
 
+
+def print_channels():
+    """Print all channel IDs."""
+    channel_ids = get_user_channels()
+    
+    if not channel_ids:
+        print("No channels found or error occurred.")
+        return
+    
+    print("\n" + "="*70)
+    print(f"CHANNEL IDs (Total: {len(channel_ids)})")
+    print("="*70)
+    
+    for i, channel_id in enumerate(channel_ids, 1):
+        print(f"{i}. {channel_id}")
+    
+    print("="*70 + "\n")
+
+
 if __name__ == "__main__":
-    """
-    Quick manual test harness.
-    Ensure SLACK_BOT_TOKEN (and optionally SLACK_CHANNEL_ID) plus OPENAI credentials are set.
-    """
-    channel_id = os.getenv("SLACK_CHANNEL_ID", "C09S2FM7TND")  # Replace with your channel ID
-    print(f"Fetching messages from Slack channel {channel_id}...")
-    messages = fetch_all_messages(channel_id)
-
-    if not messages:
-        print("No messages fetched; aborting.")
-        raise SystemExit(1)
-
-    try:
-        from parse_messages import parse_messages_list
-        from check_meetings import check_for_meetings
-        from openai import OpenAI
-
-        parsed_messages = parse_messages_list(messages)
-        print(f"\nParsed {len(parsed_messages)} messages")
-
-        if not parsed_messages:
-            print("No valid messages to send to OpenAI")
-            raise SystemExit(0)
-
-        api_key = os.getenv("OPENAI_API_KEY") or os.getenv("API_KEY")
-        if not api_key:
-            raise RuntimeError("OPENAI_API_KEY / API_KEY is not set.")
-
-        client = OpenAI(api_key=api_key, base_url=os.getenv("OPENAI_BASE_URL"))
-        json_responses = check_for_meetings(parsed_messages, client)
-
-        print(f"\n=== Final Summary ===")
-        print(f"Total JSON responses: {len(json_responses)}")
-        for i, json_obj in enumerate(json_responses, 1):
-            print(f"\nMeeting {i}:")
-            for key, value in json_obj.items():
-                print(f"  {key}: {value}")
-    except Exception as exc:
-        print(f"Error processing messages: {exc}")
+    import sys
+    
+    if len(sys.argv) > 1 and sys.argv[1] == "--list-channels":
+        print_channels()
+    else:
+        channel_id = os.getenv("SLACK_CHANNEL_ID", "C09RKGDKDRT")
+        print(f"Fetching messages from Slack channel {channel_id}...")
+        messages = fetch_all_messages(channel_id)
+        
+        if messages:
+            print(f"Successfully fetched {len(messages)} messages")
+            # Print first few for verification
+            for msg in messages[:3]:
+                print(msg)
+        else:
+            print("No messages fetched or error occurred.")
