@@ -190,4 +190,22 @@ src/
 
 That’s it—launch the services, open http://localhost:7860 for the chatbot, http://localhost:5050 for the calendar, and invite your Slack bot to a channel to watch meetings get captured automatically. Happy hacking! 🚀
 
+---
+
+## 9. Future work
+
+Below are small-to-medium features and improvements you might consider implementing next. They are prioritized so you can pick quick wins first.
+
+- Authentication & user accounts — add sign-in and per-user calendars (OAuth for Google/Microsoft Calendar).
+- Calendar sync & two-way integration — sync meetings with external calendars and handle conflicts/updates.
+- Better NLP extraction — improve meeting parsing, add intent classification, and support follow-up questions.
+- Meeting summaries & action item extraction — auto-generate short summaries and TODOs after meetings.
+- Recurring events & timezone handling — smarter recurrence rules and robust timezone conversions.
+- UI/UX polish — add responsive layouts, keyboard shortcuts, and improved accessibility for the calendar/chat UI.
+- Notifications & preferences — let users choose channels, reminder windows, and notification channels (email/Slack).
+- Tests, CI & linting — add unit/integration tests and a GitHub Actions workflow to run checks on push/PR.
+- Docker & deployment manifests — containerize services and provide a simple production deployment recipe.
+- Metrics & observability — basic logging, health endpoints, and metrics for job cadence and API latency.
+
+If you'd like, I can convert these to GitHub issues, add a prioritized backlog, or scaffold CI/tests for the project next.
 
