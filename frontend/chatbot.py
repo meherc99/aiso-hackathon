@@ -1295,13 +1295,6 @@ def build_app() -> gr.Blocks:
                             type="messages",
                         )
 
-                        magic_button = gr.Button(
-                            "AI Magic",
-                            elem_id="magic-ai-button",
-                            size="lg",
-                            variant="primary"
-                        )
-
                         with gr.Row():
                             message = gr.Textbox(
                                 show_label=False,
@@ -1386,13 +1379,6 @@ def build_app() -> gr.Blocks:
                 schedule_panel,
                 tasks_panel,
             ],
-            queue=False,
-        )
-
-        magic_button.click(
-            run_agent_background,
-            inputs=[conversation_state],
-            outputs=[schedule_panel, tasks_panel],
             queue=False,
         )
 
