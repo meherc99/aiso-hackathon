@@ -1,11 +1,10 @@
-import os
 from slack_sdk import WebClient
 from slack_sdk.errors import SlackApiError
-
-# Initialize the Slack client with your bot token
+import os
+import sys
 from dotenv import load_dotenv
-load_dotenv()
 
+load_dotenv()
 
 client = WebClient(token=os.getenv('SLACK_BOT_TOKEN'))
 
@@ -41,6 +40,40 @@ def fetch_all_messages(channel_id):
         print(f"Error fetching messages: {e.response['error']}")
         return []
 
+def get_user_channels():
+    """
+    Fetch all channel IDs that the bot/user is a member of.
+    
+    Returns:
+        List[str]: List of channel IDs.
+        Returns empty list on error.
+    """
+    try:
+        # Fetch all conversations the bot is a member of
+        response = client.conversations_list(
+            types="public_channel,private_channel",  # Include both public and private
+            exclude_archived=True,  # Don't include archived channels
+            limit=1000  # Max limit per request
+        )
+        
+        channels = response.get('channels', [])
+        
+        # Filter to only channels the bot is a member of and extract IDs
+        channel_ids = [
+            channel['id']
+            for channel in channels
+            if channel.get('is_member', False)  # Only channels bot is a member of
+        ]
+        
+        print(f"Found {len(channel_ids)} channel(s) the bot is a member of.")
+        return channel_ids
+        
+    except SlackApiError as e:
+        print(f"Error fetching channels: {e.response['error']}", file=sys.stderr)
+        return []
+    except Exception as e:
+        print(f"Unexpected error fetching channels: {e}", file=sys.stderr)
+        return []
 
 if __name__ == "__main__":
     """
