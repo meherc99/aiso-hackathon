@@ -135,6 +135,24 @@ class JSONDatabase:
         db = self._read_db()
         return db.get('meetings', [])
     
+    def meeting_exists(
+        self,
+        channel_id: str,
+        date_of_meeting: str,
+        start_time: str,
+        title: str,
+    ) -> bool:
+        """Check if a meeting with the same channel, date, start time, and title already exists."""
+        for meeting in self.get_all_meetings():
+            if (
+                meeting.get("channel_id") == channel_id
+                and meeting.get("date_of_meeting") == date_of_meeting
+                and meeting.get("start_time") == start_time
+                and (meeting.get("title") or "").strip().lower() == (title or "").strip().lower()
+            ):
+                return True
+        return False
+    
     def get_all_tasks(self) -> List[Dict[str, Any]]:
         """Get all tasks from the database."""
         db = self._read_db()

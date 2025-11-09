@@ -6,6 +6,7 @@ import re
 import uuid
 from datetime import datetime, timezone
 from zoneinfo import ZoneInfo
+from typing import Any, Dict, List
 
 from dotenv import load_dotenv
 from openai import OpenAI
@@ -126,15 +127,23 @@ def process_channel(channel_id: str, client: OpenAI, db) -> dict:
             print(f"Analyzing {len(non_mention_messages)} non-mention messages for meetings...")
             try:
                 meetings_result = check_for_meetings(non_mention_messages, client)
-                if meetings_result:
-                    # Add channel_id to each meeting so we know where to send notifications
-                    for meeting in meetings_result:
-                        meeting['channel_id'] = channel_id
-                        meeting['notified'] = False  # Track if we've sent a notification
-                    
-                    db.add_meetings(meetings_result)
-                    result['meetings_count'] = len(meetings_result)
-                    print(f"Persisted {len(meetings_result)} meeting(s) from channel {channel_id}")
+                filtered_meetings: List[Dict[str, Any]] = []
+                for meeting in meetings_result or []:
+                    meeting['channel_id'] = channel_id
+                    meeting['notified'] = False
+                    title = meeting.get("title", "")
+                    date_of_meeting = meeting.get("date_of_meeting")
+                    start_time = meeting.get("start_time")
+                    if not (date_of_meeting and start_time):
+                        continue
+                    if db.meeting_exists(channel_id, date_of_meeting, start_time, title):
+                        continue
+                    filtered_meetings.append(meeting)
+
+                if filtered_meetings:
+                    db.add_meetings(filtered_meetings)
+                    result['meetings_count'] = len(filtered_meetings)
+                    print(f"Persisted {len(filtered_meetings)} meeting(s) from channel {channel_id}")
             except Exception as exc:
                 print(f"Error checking meetings in channel {channel_id}: {exc}", file=sys.stderr)
         else:

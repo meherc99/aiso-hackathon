@@ -49,17 +49,49 @@ def find_upcoming_meetings(within_minutes: int = 15):
     db = get_default_db()
     results = []
     now = datetime.now(AMSTERDAM_TZ)
+    seen_keys: set[tuple[str, str, str, str]] = set()
+    duplicates: list[str] = []
 
     for m in db.get_all_meetings():
+        if m.get("category") and m.get("category") != "meetings":
+            continue
+        channel_id = m.get("channel_id")
+        if not channel_id:
+            continue
+        if m.get("notified"):
+            continue
+        if m.get("meeting_completed"):
+            continue
         date_str = m.get("date_of_meeting")
         time_str = m.get("start_time") or m.get("start") or m.get("time")
         dt = _parse_meeting_datetime(date_str, time_str)
         if not dt:
             continue
 
+        if dt < now:
+            meeting_id = m.get("id")
+            if meeting_id:
+                db.update_meeting(meeting_id, {"meeting_completed": True, "notified": True})
+            continue
+
         delta = dt - now
         if timedelta(0) <= delta <= timedelta(minutes=within_minutes):
+            key = (
+                channel_id,
+                date_str or "",
+                (time_str or "").strip(),
+                (m.get("title") or "").strip().lower(),
+            )
+            if key in seen_keys:
+                meeting_id = m.get("id")
+                if meeting_id:
+                    duplicates.append(meeting_id)
+                continue
+            seen_keys.add(key)
             results.append((m, dt))
+
+    for meeting_id in duplicates:
+        db.update_meeting(meeting_id, {"notified": True})
     
     return results
 
@@ -117,9 +149,9 @@ def send_slack_notification(channel_id: str, meeting: dict, dt: datetime, client
     
     # Filter out the bot itself from mentions
     user_mentions = [f"<@{user_id}>" for user_id in members if user_id != bot_user_id]
-    
-    # Create mention string
-    mentions_string = " ".join(user_mentions) if user_mentions else ""
+    mentions_string = " ".join(sorted(set(user_mentions)))
+    if not mentions_string:
+        mentions_string = "<!channel>"
     
     # Build message with Slack formatting
     message = f"""

@@ -13,6 +13,7 @@ from datetime import datetime, date, timedelta
 
 import gradio as gr
 import requests
+from zoneinfo import ZoneInfo
 
 from chat_logic import Message, build_bot_reply, messages_to_history
 from storage import ConversationStore
@@ -21,6 +22,7 @@ store = ConversationStore()
 logger = logging.getLogger(__name__)
 CALENDAR_API = os.getenv("VITE_CALENDAR_API", "http://localhost:5050/api")
 _LATEST_CREATED_EVENT: Dict[str, Dict[str, Any]] = {}
+LOCAL_TZ = ZoneInfo("Europe/Amsterdam")
 
 CSS_FILE = os.path.join(os.path.dirname(__file__), "static", "chatbot.css")
 PANEL_CSS = """
@@ -355,6 +357,20 @@ def _coerce_time_string(value: str | None) -> str:
     if not value:
         return ""
 
+    am_pm_match = re.match(
+        r"^(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<meridiem>am|pm)$",
+        value,
+        re.IGNORECASE,
+    )
+    if am_pm_match:
+        hour = int(am_pm_match.group("hour"))
+        minute = int(am_pm_match.group("minute") or "00")
+        meridiem = am_pm_match.group("meridiem").lower()
+        hour = hour % 12
+        if meridiem == "pm":
+            hour += 12
+        return f"{hour:02d}:{minute:02d}"
+
     normal = _normalise_time(value)
     if normal:
         return normal
@@ -413,30 +429,40 @@ def _parse_time_offset(text: Optional[str]) -> Optional[int]:
         return None
     lowered = text.lower()
 
+    in_pattern = re.compile(
+        r"in\s+(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|minutes?|mins?)",
+        re.IGNORECASE,
+    )
     numeric_pattern = re.compile(
-        r"(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|minutes?|mins?)\s*(?P<direction>later|after|earlier|before|forward|sooner|back)",
+        r"(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|minutes?|mins?)(?:\s*(?P<direction>later|after|earlier|before|forward|sooner|back))?",
         re.IGNORECASE,
     )
     word_pattern = re.compile(
-        r"(?P<amount_word>zero|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half|quarter)\s*(?P<unit>hours?|hrs?|minutes?|mins?)\s*(?P<direction>later|after|earlier|before|forward|sooner|back)",
+        r"(?P<amount_word>zero|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half|quarter)\s*(?P<unit>hours?|hrs?|minutes?|mins?)(?:\s*(?P<direction>later|after|earlier|before|forward|sooner|back))?",
         re.IGNORECASE,
     )
 
-    match = numeric_pattern.search(lowered)
+    match = in_pattern.search(lowered)
     if match:
         amount = float(match.group("amount"))
         unit = match.group("unit").lower()
-        direction = match.group("direction").lower()
+        direction = "later"
     else:
-        match = word_pattern.search(lowered)
-        if not match:
-            return None
-        amount_word = match.group("amount_word").lower()
-        amount = _NUMBER_WORDS.get(amount_word)
-        if amount is None:
-            return None
-        unit = match.group("unit").lower()
-        direction = match.group("direction").lower()
+        match = numeric_pattern.search(lowered)
+        if match:
+            amount = float(match.group("amount"))
+            unit = match.group("unit").lower()
+            direction = (match.group("direction") or "later").lower()
+        else:
+            match = word_pattern.search(lowered)
+            if not match:
+                return None
+            amount_word = match.group("amount_word").lower()
+            amount = _NUMBER_WORDS.get(amount_word)
+            if amount is None:
+                return None
+            unit = match.group("unit").lower()
+            direction = (match.group("direction") or "later").lower()
 
     if unit.startswith("hour") or unit.startswith("hr"):
         minutes = int(amount * 60)
@@ -490,6 +516,15 @@ def apply_calendar_action(
 
     if action_type == "create":
         date_str = (action.get("date") or action.get("date_of_meeting") or "").strip()
+        offset_minutes = _parse_time_offset(user_message)
+        if offset_minutes is not None:
+            now_local = datetime.now(LOCAL_TZ)
+            target_dt = now_local + timedelta(minutes=offset_minutes)
+            date_str = target_dt.date().isoformat()
+            action["start_time"] = target_dt.strftime("%H:%M")
+            if not (action.get("end_time") or action.get("endTime")):
+                action["end_time"] = (target_dt + timedelta(hours=1)).strftime("%H:%M")
+
         if not date_str:
             events = fetch_calendar_events(None)
             suggestions = _suggest_free_days(events)
@@ -504,7 +539,8 @@ def apply_calendar_action(
                 return "\n".join(lines)
             return "⚠️ I couldn’t find an open day yet. Please tell me which date you prefer."
 
-        start_time = _normalise_time(action.get("start_time") or action.get("startTime"))
+        start_time = _coerce_time_string(action.get("start_time") or action.get("startTime"))
+        start_time = _normalise_time(start_time)
         end_time = _normalise_time(action.get("end_time") or action.get("endTime"))
 
         if not start_time:

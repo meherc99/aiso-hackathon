@@ -24,26 +24,20 @@ def job():
 def main():
     """Main scheduler loop - runs every 5 minutes."""
     print("🚀 Meeting Reminder Scheduler started")
-    print("⏰ Checking for upcoming meetings every 5 minutes")
-    print("📍 First check: immediately")
-    next_run = datetime.now().replace(second=0, microsecond=0)
-    next_run = next_run.replace(minute=(next_run.minute // 5 + 1) * 5 % 60)
-    if next_run.minute == 0:
-        next_run = next_run.replace(hour=next_run.hour + 1)
-    print(f"📍 Next scheduled check: {next_run}")
+    print("⏰ Checking for upcoming meetings every 30 seconds")
     print("\nPress Ctrl+C to stop\n")
     
     # Run immediately on start
     job()
     
-    # Schedule to run every 5 minutes
-    schedule.every(5).minutes.do(job)
+    # Schedule to run every 30 seconds (testing)
+    schedule.every(30).seconds.do(job)
     
     # Keep the script running
     try:
         while True:
             schedule.run_pending()
-            time.sleep(10)  # Check every 10 seconds
+            time.sleep(1)  # Keep loop responsive
     except KeyboardInterrupt:
         print("\n\n🛑 Meeting reminder scheduler stopped by user")
         sys.exit(0)

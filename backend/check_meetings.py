@@ -16,49 +16,122 @@ from typing import List, Dict, Any
 import os
 import json
 import sys
-from datetime import datetime, time, timezone
+import re
+import logging
+from datetime import datetime, timedelta, timezone
+from zoneinfo import ZoneInfo
 import uuid
 import openai
-from openai import OpenAI, max_retries
 from dotenv import load_dotenv
 
 load_dotenv()
 
+AMSTERDAM_TZ = ZoneInfo("Europe/Amsterdam")
+logger = logging.getLogger(__name__)
 
-import os
-import re
-import json
-import uuid
-from datetime import datetime
-from typing import List, Dict, Any
-import openai
+
+def _parse_time_offset(text: str | None) -> int | None:
+    if not text:
+        return None
+    lowered = text.lower()
+
+    in_pattern = re.compile(r"in\s+(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|minutes?|mins?)")
+    numeric_pattern = re.compile(
+        r"(?P<amount>\d+(?:\.\d+)?)\s*(?P<unit>hours?|hrs?|minutes?|mins?)(?:\s*(?P<direction>later|after|earlier|before|forward|sooner|back))?"
+    )
+    word_pattern = re.compile(
+        r"(?P<amount_word>zero|a|an|one|two|three|four|five|six|seven|eight|nine|ten|eleven|twelve|half|quarter)\s*(?P<unit>hours?|hrs?|minutes?|mins?)(?:\s*(?P<direction>later|after|earlier|before|forward|sooner|back))?"
+    )
+
+    match = in_pattern.search(lowered)
+    if match:
+        amount = float(match.group("amount"))
+        unit = match.group("unit").lower()
+        direction = "later"
+    else:
+        match = numeric_pattern.search(lowered)
+        if match:
+            amount = float(match.group("amount"))
+            unit = match.group("unit").lower()
+            direction = (match.group("direction") or "later").lower()
+        else:
+            match = word_pattern.search(lowered)
+            if not match:
+                return None
+            amount_word = match.group("amount_word").lower()
+            amount_map = {
+                "zero": 0,
+                "a": 1,
+                "an": 1,
+                "one": 1,
+                "two": 2,
+                "three": 3,
+                "four": 4,
+                "five": 5,
+                "six": 6,
+                "seven": 7,
+                "eight": 8,
+                "nine": 9,
+                "ten": 10,
+                "eleven": 11,
+                "twelve": 12,
+                "half": 0.5,
+                "quarter": 0.25,
+            }
+            amount = amount_map.get(amount_word)
+            if amount is None:
+                return None
+            unit = match.group("unit").lower()
+            direction = (match.group("direction") or "later").lower()
+
+    minutes = int(amount * 60) if unit.startswith(("hour", "hr")) else int(amount)
+    if direction in {"earlier", "before", "forward", "sooner", "ahead", "back"}:
+        minutes *= -1
+    return minutes
+
+
+def _coerce_time_string(value: str | None) -> str | None:
+    if not value:
+        return None
+    value = value.strip()
+    if not value:
+        return None
+
+    am_pm_match = re.match(
+        r"^(?P<hour>\d{1,2})(?::(?P<minute>\d{2}))?\s*(?P<meridiem>am|pm)$",
+        value,
+        re.IGNORECASE,
+    )
+    if am_pm_match:
+        hour = int(am_pm_match.group("hour")) % 12
+        minute = int(am_pm_match.group("minute") or "00")
+        if am_pm_match.group("meridiem").lower() == "pm":
+            hour += 12
+        return f"{hour:02d}:{minute:02d}"
+
+    try:
+        datetime.strptime(value, "%H:%M")
+        return value
+    except ValueError:
+        return None
 
 
 def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) -> List[Dict[str, Any]]:
     instruction = (
-            "Don't switch to reasoning models. The date we are in is 2025-11-09, so make sure you correctly check current dates. To create the time_stamps and the dates, please look at the timestamps provided to you. The start time We have this conversation in a JSON format. Your task is to determine when a meeting should be scheduled, based on the messages. "
-            "If multiple meetings are mentioned, you should return multiple json objects that follow the same pattern, but with different parameters, "
-            "depending on the meetings' dates, times and also descriptions. "
-            "Return multiple JSON objects and nothing else, with the details below. An object must have five keys: "
-            "date_of_meeting whose value is the date agreed for the meeting in ISO8601 format YYYY-MM-DD, for example: {\"date_of_meeting\": \"2025-06-10\"}. If not date is specified, try to look for words like tommorrow or today, so a context can be infered based on the current date in UTC"
-            "If no date is mentioned or time-related words, use the current date in UTC. "
-            "start_time whose value is the agreed meeting time in 24-hour HH:MM format in UTC, for example: {\"time\": \"00:00\"}. "
-            "end_time whose value is the agreed end time of the meeting. If nothing is agreed, the timestamp returned here should consider a duration of 30 minutes per meeting. "
-            "The format is also HH:MM in UTC, for example: {\"end_time\": \"00:30\"}. "
-            "description whose value is the description of the meeting. This will be simple text summarizing what the meeting will be about. "
-            "If nothing is mentioned just leave it blank. It shouldn't be longer than 20 words. "
-            "title whose value is the title of the meeting. This can be derived from the description. It shouldn't be longer than a few words. "
-            "Do not include any extra text, explanation, or formatting — only the JSON objects."
-        )
-
-    model = os.environ.get("MODEL", "gpt-5")
+        "Don't switch to reasoning models. The date we are in is 2025-11-09. "
+        "We have this conversation in a JSON format. Your task is to determine when a meeting should be scheduled, based on the messages. "
+        "If multiple meetings are mentioned, return multiple JSON objects with the fields: "
+        "date_of_meeting (ISO8601 YYYY-MM-DD), start_time (HH:MM UTC), end_time (HH:MM UTC, default 30 minutes after start), "
+        "description (<= 20 words), title. Extract times using the message timestamps. "
+        "Do not include any extra text, explanation, or formatting — only the JSON objects."
+    )
 
     user_content = json.dumps(messages, ensure_ascii=False)
 
     chat_messages = [
-            {"role": "system", "content": instruction},
-            {"role": "user", "content": user_content},
-        ]
+        {"role": "system", "content": instruction},
+        {"role": "user", "content": user_content},
+    ]
 
     key = os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY")
     if not key:
@@ -69,7 +142,7 @@ def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) ->
         base_url="https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1",
     )
 
-    print(chat_messages)
+    logger.debug("Meeting extraction prompt: %s", chat_messages)
 
     resp = client.chat.completions.create(
         model="gpt-4.1",
@@ -79,16 +152,14 @@ def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) ->
 
     try:
         assistant_text = resp.choices[0].message.content
-        print(f"\n[DEBUG] Raw OpenAI response for tasks:\n{assistant_text}\n")
+        logger.debug("Raw OpenAI response for meetings:\n%s", assistant_text)
     except Exception as e:
-        print(f"Error extracting assistant content: {e}", file=sys.stderr)
+        logger.error("Error extracting assistant content: %s", e)
         return []
 
-    # Parse multiple JSON objects (handles JSON array, single object, or line-separated objects)
     json_objects = []
     assistant_text = assistant_text.strip()
-    
-    # Try parsing as a single JSON value first (array or object)
+
     try:
         parsed = json.loads(assistant_text)
         if isinstance(parsed, list):
@@ -96,7 +167,6 @@ def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) ->
         elif isinstance(parsed, dict):
             json_objects = [parsed]
     except json.JSONDecodeError:
-        # If that fails, try parsing line-by-line (JSON Lines format)
         for line in assistant_text.splitlines():
             line = line.strip()
             if not line:
@@ -105,45 +175,95 @@ def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) ->
                 obj = json.loads(line)
                 if isinstance(obj, dict):
                     json_objects.append(obj)
-            except json.JSONDecodeError as e:
-                print(f"Failed to parse line as JSON: {line[:100]}", file=sys.stderr)
+            except json.JSONDecodeError:
+                logger.debug("Failed to parse line as JSON: %s", line[:100])
                 continue
 
     if not json_objects:
-        print(f"No valid JSON objects found in response", file=sys.stderr)
+        logger.debug("No valid JSON objects found in meetings response")
         return []
 
-    now = datetime.now(timezone.utc)
-    created_at = now.isoformat()
+    now_utc = datetime.now(timezone.utc)
+    created_at = now_utc.isoformat()
+
+    latest_message = messages[-1] if messages else {}
+    latest_text = latest_message.get("message")
+    latest_timestamp = latest_message.get("send_time")
+    message_dt = None
+    if latest_timestamp:
+        try:
+            message_dt = datetime.fromisoformat(latest_timestamp.replace("Z", "+00:00")).astimezone(AMSTERDAM_TZ)
+        except Exception:
+            message_dt = None
 
     augmented = []
     for obj in json_objects:
         if not isinstance(obj, dict):
-            print(f"Skipping non-dict task object: {obj}", file=sys.stderr)
+            logger.debug("Skipping non-dict meeting object: %s", obj)
             continue
-        
-        obj.setdefault('id', str(uuid.uuid4()))
-        obj['category'] = 'work'
-        obj['created_at'] = created_at
 
-        task_completed = False
+        obj.setdefault("id", str(uuid.uuid4()))
+        obj["category"] = "meetings"
+        obj["created_at"] = created_at
+        obj.setdefault("notified", False)
+
+        date_str = obj.get("date_of_meeting")
+        start_time = _coerce_time_string(obj.get("start_time"))
+        end_time = _coerce_time_string(obj.get("end_time"))
+
+        offset_minutes = _parse_time_offset(latest_text or "")
+        if offset_minutes is not None and message_dt and not start_time:
+            target_start = message_dt + timedelta(minutes=offset_minutes)
+            obj["date_of_meeting"] = target_start.date().isoformat()
+            obj["start_time"] = target_start.strftime("%H:%M")
+            obj["end_time"] = (target_start + timedelta(minutes=30)).strftime("%H:%M")
+        else:
+            used_default = False
+            try:
+                if date_str and start_time:
+                    try:
+                        start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                    except ValueError:
+                        start_dt = datetime.strptime(f"{date_str} {start_time}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                    local_start = start_dt.astimezone(AMSTERDAM_TZ)
+                    obj["date_of_meeting"] = local_start.date().isoformat()
+                    obj["start_time"] = local_start.strftime("%H:%M")
+
+                    if end_time:
+                        try:
+                            end_dt = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M").replace(tzinfo=timezone.utc)
+                        except ValueError:
+                            end_dt = datetime.strptime(f"{date_str} {end_time}", "%Y-%m-%d %H:%M:%S").replace(tzinfo=timezone.utc)
+                        obj["end_time"] = end_dt.astimezone(AMSTERDAM_TZ).strftime("%H:%M")
+                    else:
+                        obj["end_time"] = (local_start + timedelta(minutes=30)).strftime("%H:%M")
+                elif message_dt:
+                    obj["date_of_meeting"] = message_dt.date().isoformat()
+                    obj["start_time"] = message_dt.strftime("%H:%M")
+                    obj["end_time"] = (message_dt + timedelta(minutes=30)).strftime("%H:%M")
+                else:
+                    used_default = True
+            except Exception:
+                used_default = True
+
+            if used_default and message_dt:
+                obj["date_of_meeting"] = message_dt.date().isoformat()
+                obj["start_time"] = message_dt.strftime("%H:%M")
+                obj["end_time"] = (message_dt + timedelta(minutes=30)).strftime("%H:%M")
+
         try:
-            date_str = obj.get('date_of_meeting')
-            time_str = obj.get('start_time') or '23:59'
-            if date_str:
-                task_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
-                task_dt = task_dt.replace(tzinfo=timezone.utc)
-                task_completed = now > task_dt
+            start_dt_local = datetime.strptime(
+                f"{obj['date_of_meeting']} {obj['start_time']}",
+                "%Y-%m-%d %H:%M"
+            ).replace(tzinfo=AMSTERDAM_TZ)
+            obj["meeting_completed"] = now_utc > start_dt_local.astimezone(timezone.utc)
         except Exception:
-            task_completed = False
+            obj["meeting_completed"] = False
 
-        obj['meeting_completed'] = task_completed
         augmented.append(obj)
 
-    print(f"\nOpenAI Response - Found {len(augmented)} task(s):")
-    for i, obj in enumerate(augmented, 1):
-        print(f"\nTask {i}:")
-        print(json.dumps(obj, indent=2, ensure_ascii=False))
+    logger.debug("Processed %d meeting(s)", len(augmented))
+    logger.debug("Augmented meetings payload: %s", json.dumps(augmented, indent=2, ensure_ascii=False))
 
     return augmented
 
@@ -207,9 +327,9 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
     # Extract assistant content
     try:
         assistant_text = resp.choices[0].message.content
-        print(f"\n[DEBUG] Raw OpenAI response for tasks:\n{assistant_text}\n")
+        logger.debug("Raw OpenAI response for tasks:\n%s", assistant_text)
     except Exception as e:
-        print(f"Error extracting assistant content: {e}", file=sys.stderr)
+        logger.error("Error extracting assistant content: %s", e)
         return []
 
     # Parse multiple JSON objects (handles JSON array, single object, or line-separated objects)
@@ -233,12 +353,12 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
                 obj = json.loads(line)
                 if isinstance(obj, dict):
                     json_objects.append(obj)
-            except json.JSONDecodeError as e:
-                print(f"Failed to parse line as JSON: {line[:100]}", file=sys.stderr)
+            except json.JSONDecodeError:
+                logger.debug("Failed to parse line as JSON (tasks): %s", line[:100])
                 continue
 
     if not json_objects:
-        print(f"No valid JSON objects found in response", file=sys.stderr)
+        logger.debug("No valid JSON objects found in tasks response")
         return []
 
     now = datetime.now(timezone.utc)
@@ -247,7 +367,7 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
     augmented = []
     for obj in json_objects:
         if not isinstance(obj, dict):
-            print(f"Skipping non-dict task object: {obj}", file=sys.stderr)
+            logger.debug("Skipping non-dict task object: %s", obj)
             continue
         
         obj.setdefault('id', str(uuid.uuid4()))
@@ -268,9 +388,7 @@ def check_for_tasks(messages: List[Dict[str, str]], client):
         obj['meeting_completed'] = task_completed
         augmented.append(obj)
 
-    print(f"\nOpenAI Response - Found {len(augmented)} task(s):")
-    for i, obj in enumerate(augmented, 1):
-        print(f"\nTask {i}:")
-        print(json.dumps(obj, indent=2, ensure_ascii=False))
+    logger.debug("Processed %d task(s)", len(augmented))
+    logger.debug("Augmented tasks payload: %s", json.dumps(augmented, indent=2, ensure_ascii=False))
 
     return augmented
