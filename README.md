@@ -176,12 +176,12 @@ src/
       └── EventList.jsx                               # sidebar/list of upcoming events
    ├──store/
       ├──events.js                                 # Manages creation, editing, and display of calendar events
-   App.jsx                                        # Root React component: app layout, routes, and top-level providers
-   index.html                                     # Main HTML entry — mounts the frontend app, links scripts and global styles
-   main.jsx                                       # Client entrypoint: renders <App /> into the DOM and bootstraps providers
-   package-lock.json                              # NPM lockfile: exact dependency tree for reproducible installs (do not edit)
-   package.json                                   # Project manifest: scripts, dependencies, and metadata for npm
-   styles.css                                     # Global styles: base rules, variables, and layout utilities
+├──App.jsx                                        # Root React component: app layout, routes, and top-level providers
+├──index.html                                     # Main HTML entry — mounts the frontend app, links scripts and global styles
+├──main.jsx                                       # Client entrypoint: renders <App /> into the DOM and bootstraps providers
+├──package-lock.json                              # NPM lockfile: exact dependency tree for reproducible installs (do not edit)
+├──package.json                                   # Project manifest: scripts, dependencies, and metadata for npm
+├──styles.css                                     # Global styles: base rules, variables, and layout utilities
    
    
 ```
@@ -189,4 +189,5 @@ src/
 ---
 
 That’s it—launch the services, open http://localhost:7860 for the chatbot, http://localhost:5050 for the calendar, and invite your Slack bot to a channel to watch meetings get captured automatically. Happy hacking! 🚀
+
 
