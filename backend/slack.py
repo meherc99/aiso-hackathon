@@ -6,7 +6,8 @@ from dotenv import load_dotenv
 
 load_dotenv()
 
-client = WebClient(token=os.getenv('SLACK_BOT_TOKEN'))
+client = WebClient(token=os.getenv('SLACK_BOT_TOKEN'), timeout=60)  # Increased timeout to 60 seconds
+
 
 def fetch_all_messages(channel_id, oldest_timestamp=None):
     """

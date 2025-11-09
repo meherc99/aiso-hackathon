@@ -31,7 +31,7 @@ SERVICES = [
     },
     {
         "name": "Scheduler",
-        "command": [sys.executable, "scheduler.py"],
+        "command": [sys.executable, "master_scheduler.py"],
         "cwd": PROJECT_ROOT / "backend",
         "color": "\033[93m",  # Yellow
     },

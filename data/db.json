@@ -1,0 +1,111 @@
+{
+  "meetings": [
+    {
+      "date_of_meeting": "2025-11-11",
+      "start_time": "15:00",
+      "end_time": "15:30",
+      "description": "General meeting next week",
+      "title": "Weekly Meeting",
+      "id": "5c400684-184b-4e31-8697-02558de31b9e",
+      "category": "meetings",
+      "meeting_completed": false,
+      "created_at": "2025-11-09T11:55:29.380447",
+      "channel_id": "C09RKGDKDRT",
+      "notified": false
+    },
+    {
+      "date_of_meeting": "2025-11-12",
+      "start_time": "16:00",
+      "end_time": "16:30",
+      "description": "Meeting about cooking",
+      "title": "Cooking Meeting",
+      "id": "d8285d41-ffa1-40b4-8871-14c841bf6fd4",
+      "category": "meetings",
+      "meeting_completed": false,
+      "created_at": "2025-11-09T11:55:29.380447",
+      "channel_id": "C09RKGDKDRT",
+      "notified": false
+    },
+    {
+      "date_of_meeting": "2025-11-09",
+      "start_time": "11:54",
+      "end_time": "12:24",
+      "description": "Meeting about mathias",
+      "title": "Mathias Meeting",
+      "id": "0f2a552f-d345-40a1-b1ca-8a9edc15f847",
+      "category": "meetings",
+      "meeting_completed": false,
+      "created_at": "2025-11-09T11:55:29.380447",
+      "channel_id": "C09RKGDKDRT",
+      "notified": false
+    },
+    {
+      "date_of_meeting": "2025-11-08",
+      "start_time": "13:00",
+      "end_time": "13:30",
+      "description": "Discussion about FPGAs",
+      "title": "FPGAs meeting",
+      "id": "0d4a5b06-899a-4b46-87ec-8ac588aa6667",
+      "category": "meetings",
+      "meeting_completed": false,
+      "created_at": "2025-11-09T11:55:48.325698",
+      "channel_id": "C09S2FM7TND",
+      "notified": false
+    },
+    {
+      "date_of_meeting": "2025-11-09",
+      "start_time": "16:00",
+      "end_time": "17:00",
+      "description": "Covering HR topics and cooking",
+      "title": "HR and cooking meeting",
+      "id": "5feea8dd-9383-499b-ae8a-c9407b7cbbcb",
+      "category": "meetings",
+      "meeting_completed": false,
+      "created_at": "2025-11-09T11:55:48.325698",
+      "channel_id": "C09S2FM7TND",
+      "notified": false
+    }
+  ],
+  "tasks": [
+    {
+      "date_of_meeting": "2025-11-09",
+      "start_time": "23:59",
+      "end_time": "23:59",
+      "description": "FPGA task",
+      "title": "FPGA task",
+      "id": "f698b4ea-ce85-4b97-82f7-4ecba44ba528",
+      "category": "tasks",
+      "created_at": "2025-11-09T11:55:45.775003+00:00",
+      "meeting_completed": false,
+      "channel_id": "C09RKGDKDRT"
+    },
+    {
+      "date_of_meeting": "2025-11-09",
+      "start_time": "08:00",
+      "end_time": "08:00",
+      "description": "Work on hackathon task",
+      "title": "Hackathon task",
+      "id": "204fed85-ed72-4b65-a8f7-c45114e19cb5",
+      "category": "tasks",
+      "created_at": "2025-11-09T11:55:45.775003+00:00",
+      "meeting_completed": true,
+      "channel_id": "C09RKGDKDRT"
+    },
+    {
+      "date_of_meeting": "2025-11-09",
+      "start_time": "23:59",
+      "end_time": "23:59",
+      "description": "Complete FPGA task",
+      "title": "FPGA task",
+      "id": "1cbc0038-7b45-4dca-80b8-8cec207a6a0c",
+      "category": "tasks",
+      "created_at": "2025-11-09T11:55:56.258964+00:00",
+      "meeting_completed": false,
+      "channel_id": "C09S2FM7TND"
+    }
+  ],
+  "channel_timestamps": {
+    "C09RKGDKDRT": "2025-11-09T11:51:55.420469+00:00",
+    "C09S2FM7TND": "2025-11-09T00:49:14.258059+00:00"
+  }
+}
