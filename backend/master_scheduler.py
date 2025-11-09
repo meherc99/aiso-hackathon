@@ -54,7 +54,7 @@ def main():
     now = datetime.now(AMSTERDAM_TZ)
     print("Master Scheduler started")
     print(f"Current Amsterdam time: {now.strftime('%Y-%m-%d %H:%M:%S %Z')}")
-    print("Cycle cadence: every 5 minutes (agent runs first, reminders second)")
+    print("Cycle cadence: every 1 minute (agent runs first, reminders second)")
     print("Using threaded execution to keep the loop responsive")
     print("\nPress Ctrl+C to stop\n")
 
@@ -62,7 +62,7 @@ def main():
     run_cycle()
 
     # Schedule subsequent cycles
-    schedule.every(5).minutes.do(run_cycle)
+    schedule.every(1).minutes.do(run_cycle)
 
     # Keep running
     try:
