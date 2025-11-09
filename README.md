@@ -128,6 +128,9 @@ python backend/master_scheduler.py
 * **Running tests quickly:** the master scheduler cadence can be changed in `backend/master_scheduler.py` (default every 5 minutes).
 * **React live reload:** run `npm run dev` in `src/` and keep the calendar server running separately.
 * **Slack reminders:** if you only want chatbot + calendar, you can skip the Slack token. The agent scheduler will still run but simply find no channels.
+* **AI memory** is implemented inside the Slack
+* **SlackBot** only works in the local environment for now
+* **Refreshing the browser** To make sure that GUI works correctly, after trying each future, refresh the browser page.
 
 ---
 
@@ -206,6 +209,8 @@ Below are small-to-medium features and improvements you might consider implement
 - Tests, CI & linting — add unit/integration tests and a GitHub Actions workflow to run checks on push/PR.
 - Docker & deployment manifests — containerize services and provide a simple production deployment recipe.
 - Metrics & observability — basic logging, health endpoints, and metrics for job cadence and API latency.
+- Deploying the SlackBot online — After implementing the features above, the SlackBot can be deployed on Slack to ensure it can run independently from the local environment. 
 
 If you'd like, I can convert these to GitHub issues, add a prioritized backlog, or scaffold CI/tests for the project next.
+
 
