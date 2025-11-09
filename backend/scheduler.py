@@ -12,22 +12,28 @@ from agent import master_agent
 def job():
     """Run the agent and log execution."""
     print(f"\n{'='*70}")
-    print(f"🤖 Running agent at {datetime.now().isoformat()}")
+    print(f"Running agent at {datetime.now().isoformat()}")
     print(f"{'='*70}\n")
     
     try:
         master_agent()
-        print(f"\n✅ Agent completed successfully at {datetime.now().isoformat()}\n")
+        print(f"\nAgent completed successfully at {datetime.now().isoformat()}\n")
     except Exception as e:
-        print(f"\n❌ Agent failed at {datetime.now().isoformat()}: {e}\n", file=sys.stderr)
+        print(f"\nAgent failed at {datetime.now().isoformat()}: {e}\n", file=sys.stderr)
 
 
 def main():
     """Main scheduler loop."""
-    print("🚀 Slack Agent Scheduler started")
-    print(f"⏰ Will run every minute")
-    print(f"🔄 First run: immediately")
-    print(f"📍 Next run: {datetime.now().replace(second=0, microsecond=0).replace(minute=datetime.now().minute + 1)}")
+    from datetime import timedelta
+    
+    print("Slack Agent Scheduler started")
+    print(f"Will run every minute")
+    print(f"First run: immediately")
+    
+    # Calculate next run time properly (handles minute=59 case)
+    next_run = datetime.now() + timedelta(minutes=1)
+    next_run = next_run.replace(second=0, microsecond=0)
+    print(f"Next run: {next_run}")
     print("\nPress Ctrl+C to stop\n")
     
     # Run immediately on start
@@ -42,7 +48,7 @@ def main():
             schedule.run_pending()
             time.sleep(1)  # Check every second
     except KeyboardInterrupt:
-        print("\n\n🛑 Scheduler stopped by user")
+        print("\n\nScheduler stopped by user")
         sys.exit(0)
 
 

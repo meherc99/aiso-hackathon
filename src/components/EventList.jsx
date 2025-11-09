@@ -27,8 +27,8 @@ export default function EventList({ events, categoryMap = {}, onEdit, onDelete, 
               </div>
               <div className="ev-actions">
                 <button onClick={() => onToggleDone(ev.id)} title="Toggle done">{ev.done ? 'Undo' : 'Done'}</button>
-                <button onClick={() => onEdit(ev)} title="Edit">✏️</button>
-                <button onClick={() => onDelete(ev.id)} title="Delete">🗑️</button>
+                <button onClick={() => onEdit(ev)} title="Edit">Edit</button>
+                <button onClick={() => onDelete(ev.id)} title="Delete">Delete</button>
               </div>
             </li>
           )
