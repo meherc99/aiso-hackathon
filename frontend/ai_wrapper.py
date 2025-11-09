@@ -119,8 +119,8 @@ class FriendlyAIWrapper:
     def _fallback_reply(user_message: str) -> str:
         """Simple templated reply when the AI client is unavailable."""
         return (
-            "Thanks for the update! I'm keeping things friendly on my end. ",
-            f"You mentioned: \"{user_message}\". How else can I support you?"
+            "Thanks for the update! I'm keeping things friendly on my end. "
+            f'You mentioned: "{user_message}". How else can I support you?'
         )
 
     def plan_calendar_action(
@@ -145,10 +145,12 @@ class FriendlyAIWrapper:
                         "content": (
                             "You are an assistant that extracts calendar instructions. "
                             "Respond ONLY with JSON containing: "
-                            '{"action":"none|create|delete","title":"","description":"","date":"","start_time":"","end_time":"","event_id":""}. '
+                            '{"action":"none|create|delete|reschedule","title":"","description":"","date":"","start_time":"","end_time":"","event_id":"","category":"","new_title":"","new_description":"","new_date":"","new_start_time":"","new_end_time":"","new_category":""}. '
                             "Use ISO 8601 date (YYYY-MM-DD) and 24-hour HH:MM time in the user's locale. "
                             "If the user does not specify a time, leave start_time empty. "
                             "If deleting, populate event_id if provided; otherwise fill title/date fields as clues. "
+                            "If rescheduling, include the original meeting details in title/date/start_time and provide the updated values in the new_* fields (leave new_* blank if unchanged). "
+                            "Set category to 'work' for professional commitments and 'personal' for leisure/free-time plans. "
                             "If no calendar action is needed, set action to 'none'."
                         ),
                     },
@@ -174,7 +176,7 @@ class FriendlyAIWrapper:
         if not isinstance(data, dict):
             return None
         action = data.get("action")
-        if action not in {"create", "delete", "none"}:
+        if action not in {"create", "delete", "reschedule", "none"}:
             return None
         logger.debug("Model calendar action: %s", data)
         return data

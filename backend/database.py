@@ -90,6 +90,46 @@ class JSONDatabase:
         data["meetings"].extend(meetings)
         self._write_db(data)
 
+    def add_meeting(self, meeting: Dict[str, Any]) -> None:
+        """Add or replace a single meeting."""
+        if not meeting:
+            return
+
+        data = self._read_db()
+        meetings = data.setdefault("meetings", [])
+
+        meeting_id = meeting.get("id")
+        if meeting_id:
+            meetings = [item for item in meetings if item.get("id") != meeting_id]
+
+        meetings.append(meeting)
+        data["meetings"] = meetings
+        self._write_db(data)
+
+    def add_tasks(self, tasks: List[Dict[str, Any]]) -> None:
+        """Add multiple tasks to the database."""
+        if not tasks:
+            return
+        data = self._read_db()
+        existing = data.setdefault("tasks", [])
+        existing.extend(tasks)
+        self._write_db(data)
+
+    def add_task(self, task: Dict[str, Any]) -> None:
+        """Add or replace a single task."""
+        if not task:
+            return
+        data = self._read_db()
+        tasks = data.setdefault("tasks", [])
+
+        task_id = task.get("id")
+        if task_id:
+            tasks = [item for item in tasks if item.get("id") != task_id]
+
+        tasks.append(task)
+        data["tasks"] = tasks
+        self._write_db(data)
+
     def get_all_meetings(self) -> List[Dict[str, Any]]:
         """Get all meetings from the database."""
         db = self._read_db()
@@ -154,8 +194,35 @@ class JSONDatabase:
     
     def delete_meeting(self, meeting_id: str) -> bool:
         """Delete a meeting by ID."""
-        
-        return False
+        if not meeting_id:
+            return False
+
+        data = self._read_db()
+        meetings = data.get("meetings", [])
+        new_meetings = [meeting for meeting in meetings if meeting.get("id") != meeting_id]
+
+        if len(new_meetings) == len(meetings):
+            return False
+
+        data["meetings"] = new_meetings
+        self._write_db(data)
+        return True
+
+    def delete_task(self, task_id: str) -> bool:
+        """Delete a task by ID."""
+        if not task_id:
+            return False
+
+        data = self._read_db()
+        tasks = data.get("tasks", [])
+        new_tasks = [task for task in tasks if task.get("id") != task_id]
+
+        if len(new_tasks) == len(tasks):
+            return False
+
+        data["tasks"] = new_tasks
+        self._write_db(data)
+        return True
 
     def clear_all(self) -> None:
         """Clear all data from the database."""
