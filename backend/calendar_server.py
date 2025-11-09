@@ -24,14 +24,14 @@ class CalendarStore:
 
     def __init__(self, db_path: Optional[Path] = None) -> None:
         if db_path is None:
-            db_path = Path(__file__).resolve().parent.parent / "frontend" / "conversations.db"
+            db_path = Path(__file__).resolve().parent/ "api" / "events.db"
         self._db_path = db_path
         self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
         self._conn.row_factory = sqlite3.Row
         self._init_schema()
 
     def _init_schema(self) -> None:
-        """Initialize events table in the database."""
+        """Initialize events and categories tables in the database."""
         with self._conn:
             self._conn.execute(
                 """
@@ -47,6 +47,15 @@ class CalendarStore:
                     done INTEGER DEFAULT 0,
                     created_at TEXT NOT NULL,
                     updated_at TEXT NOT NULL
+                )
+                """
+            )
+            self._conn.execute(
+                """
+                CREATE TABLE IF NOT EXISTS categories (
+                    id TEXT PRIMARY KEY,
+                    name TEXT NOT NULL,
+                    color TEXT NOT NULL
                 )
                 """
             )
@@ -110,18 +119,18 @@ class CalendarStore:
 
     def list_events(
         self,
-        start_date: Optional[str] = None,
-        end_date: Optional[str] = None,
+        startDate: Optional[str] = None,
+        endDate: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List all events, optionally filtered by date range."""
-        if start_date and end_date:
+        if startDate and endDate:
             rows = self._conn.execute(
                 """
                 SELECT * FROM events
                 WHERE startDate >= ? AND endDate <= ?
                 ORDER BY startDate, startTime
                 """,
-                (start_date, end_date),
+                (startDate, endDate),
             ).fetchall()
         else:
             rows = self._conn.execute(
@@ -200,6 +209,66 @@ class CalendarStore:
             "updated_at": row["updated_at"],
         }
 
+    # Category methods
+    def create_category(self, category_data: Dict[str, Any]) -> Dict[str, Any]:
+        """Create a new category."""
+        category_id = category_data.get("id") or str(uuid.uuid4())
+        category = {
+            "id": category_id,
+            "name": category_data.get("name", "Unnamed"),
+            "color": category_data.get("color", "#666666"),
+        }
+        
+        with self._conn:
+            self._conn.execute(
+                "INSERT INTO categories (id, name, color) VALUES (?, ?, ?)",
+                (category["id"], category["name"], category["color"])
+            )
+        
+        return category
+
+    def list_categories(self) -> List[Dict[str, Any]]:
+        """List all categories."""
+        rows = self._conn.execute("SELECT * FROM categories").fetchall()
+        return [{"id": row["id"], "name": row["name"], "color": row["color"]} for row in rows]
+
+    def get_category(self, category_id: str) -> Optional[Dict[str, Any]]:
+        """Get a single category by ID."""
+        row = self._conn.execute(
+            "SELECT * FROM categories WHERE id = ?", (category_id,)
+        ).fetchone()
+        
+        if not row:
+            return None
+        
+        return {"id": row["id"], "name": row["name"], "color": row["color"]}
+
+    def update_category(self, category_id: str, category_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
+        """Update an existing category."""
+        existing = self.get_category(category_id)
+        if not existing:
+            return None
+        
+        updated = {
+            "id": category_id,
+            "name": category_data.get("name", existing["name"]),
+            "color": category_data.get("color", existing["color"]),
+        }
+        
+        with self._conn:
+            self._conn.execute(
+                "UPDATE categories SET name = ?, color = ? WHERE id = ?",
+                (updated["name"], updated["color"], category_id)
+            )
+        
+        return updated
+
+    def delete_category(self, category_id: str) -> bool:
+        """Delete a category by ID."""
+        with self._conn:
+            cursor = self._conn.execute("DELETE FROM categories WHERE id = ?", (category_id,))
+            return cursor.rowcount > 0
+
 
 # Initialize Flask app
 app = Flask(__name__)
@@ -228,10 +297,10 @@ def get_events():
     Get all events, optionally filtered by date range.
     Query params: startDate, endDate (ISO format)
     """
-    start_date = request.args.get("startDate")
-    end_date = request.args.get("endDate")
+    startDate = request.args.get("startDate")
+    endDate = request.args.get("endDate")
     
-    events = calendar_store.list_events(start_date, end_date)
+    events = calendar_store.list_events(startDate, endDate)
     return jsonify(events)
 
 
@@ -282,6 +351,63 @@ def delete_event(event_id: str):
 
 
 # ============================================================================
+# Category API Routes
+# ============================================================================
+
+@app.route("/api/categories", methods=["GET"])
+def get_categories():
+    """Get all categories."""
+    categories = calendar_store.list_categories()
+    return jsonify(categories)
+
+
+@app.route("/api/categories/<category_id>", methods=["GET"])
+def get_category(category_id: str):
+    """Get a single category by ID."""
+    category = calendar_store.get_category(category_id)
+    if not category:
+        return jsonify({"error": "Category not found"}), 404
+    return jsonify(category)
+
+
+@app.route("/api/categories", methods=["POST"])
+def create_category():
+    """Create a new category."""
+    if not request.json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    
+    try:
+        category = calendar_store.create_category(request.json)
+        return jsonify(category), 201
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/categories/<category_id>", methods=["PUT", "PATCH"])
+def update_category(category_id: str):
+    """Update an existing category."""
+    if not request.json:
+        return jsonify({"error": "Request body must be JSON"}), 400
+    
+    try:
+        category = calendar_store.update_category(category_id, request.json)
+        if not category:
+            return jsonify({"error": "Category not found"}), 404
+        return jsonify(category)
+    except Exception as e:
+        return jsonify({"error": str(e)}), 400
+
+
+@app.route("/api/categories/<category_id>", methods=["DELETE"])
+def delete_category(category_id: str):
+    """Delete a category."""
+    success = calendar_store.delete_category(category_id)
+    if not success:
+        return jsonify({"error": "Category not found"}), 404
+    return jsonify({"success": True, "message": "Category deleted"})
+
+
+# ============================================================================
 # Static File Serving for React App
 # ============================================================================
 
@@ -314,10 +440,9 @@ def serve_react_app(path: str):
 def main():
     """Start the calendar server."""
     port = int(os.environ.get("CALENDAR_PORT", 5000))
-    debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
-    
+    #debug = os.environ.get("FLASK_DEBUG", "false").lower() == "true"
+    debug=True
     print(f"🚀 Calendar Server starting on http://localhost:{port}")
-    print(f"📊 API available at http://localhost:{port}/api/events")
     
     if STATIC_DIR.exists():
         print(f"📱 React app available at http://localhost:{port}/")

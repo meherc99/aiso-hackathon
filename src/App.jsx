@@ -3,38 +3,55 @@ import Calendar from './components/Calendar'
 import EventForm from './components/EventForm'
 import EventList from './components/EventList'
 import EventDetailModal from './components/EventDetailModal'
-import { loadEvents, saveEvents, getSampleEvents, loadCategories, getCategoryById } from './store/events'
+import { loadEvents, createEvent, loadCategories } from './store/events'
 
 export default function App() {
   const [events, setEvents] = useState([])
+  const [categories, setCategories] = useState([])
   const [editing, setEditing] = useState(null)
   const [viewingEvent, setViewingEvent] = useState(null)
   const [filterCategory, setFilterCategory] = useState('all')
   const [isInitialized, setIsInitialized] = useState(false)
 
+  // Load events from API
   useEffect(() => {
-    const loaded = loadEvents()
-    console.log('Loaded events from localStorage:', loaded)
-    if (!loaded || loaded.length === 0) {
-      const samples = getSampleEvents()
-      console.log('Creating sample events:', samples)
-      saveEvents(samples)
-      setEvents(samples)
-    } else {
-      setEvents(loaded)
+    async function fetchEvents() {
+      try {
+        const loaded = await loadEvents() // Add await
+        console.log('Loaded events from database:', loaded)
+        setEvents(Array.isArray(loaded) ? loaded : []) // Ensure array
+        setIsInitialized(true)
+      } catch (error) {
+        console.error('Error loading events:', error)
+        setEvents([])
+        setIsInitialized(true)
+      }
     }
-    setIsInitialized(true)
+    fetchEvents()
   }, [])
 
+  // Load categories from API
   useEffect(() => {
-    if (isInitialized) {
-      console.log('Saving events to localStorage:', events)
-      saveEvents(events)
+    async function fetchCategories() {
+      try {
+        const cats = await loadCategories() // Add await
+        console.log('Loaded categories:', cats)
+        setCategories(Array.isArray(cats) ? cats : []) // Ensure array
+      } catch (error) {
+        console.error('Error loading categories:', error)
+        setCategories([])
+      }
     }
-  }, [events, isInitialized])
+    fetchCategories()
+  }, [])
 
-  function handleCreate(event) {
-    setEvents(prev => [event, ...prev])
+  async function handleCreate(eventData) {
+    try {
+      const newEvent = await createEvent(eventData) // Add await
+      setEvents(prev => [newEvent, ...prev])
+    } catch (error) {
+      console.error('Error creating event:', error)
+    }
   }
 
   function handleUpdate(id, updates) {
@@ -58,10 +75,7 @@ export default function App() {
     setViewingEvent(null)
   }
 
-  // Get unique category IDs from events, then load full category objects
-  const categoryIds = Array.from(new Set(events.map(e => e.category))).filter(Boolean)
-  const categories = categoryIds.map(id => getCategoryById(id)).filter(Boolean)
-
+  // Filter displayed events
   const displayedEvents = filterCategory === 'all' ? events : events.filter(e => e.category === filterCategory)
 
   return (
@@ -102,7 +116,7 @@ export default function App() {
         />
       )}
 
-      <footer className="app-footer">Built with localStorage • Smooth UI • Minimal</footer>
+      <footer className="app-footer">Built with REST API • Smooth UI • Minimal</footer>
     </div>
   )
 }

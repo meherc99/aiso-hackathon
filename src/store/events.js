@@ -1,7 +1,7 @@
 import { v4 as uuidv4 } from 'uuid'
 
-// API base URL - change this if your backend runs on a different port
-const API_BASE = 'http://localhost:7860/api'
+// API base URL - Gradio app with REST endpoints
+const API_BASE = 'http://localhost:5000/api'
 
 /**
  * Fetch all events from the backend API
@@ -11,10 +11,12 @@ export async function loadEvents() {
   try {
     const response = await fetch(`${API_BASE}/events`)
     if (!response.ok) {
-      throw new Error(`HTTP error! status: ${response.status}`)
+      console.error(`HTTP error! status: ${response.status}`)
+      return []
     }
     const data = await response.json()
-    // Backend returns array directly, not wrapped in { events: [...] }
+    console.log('Loaded events:', data) // Debug log
+    // Remove normalization - backend already returns camelCase
     return Array.isArray(data) ? data : []
   } catch (err) {
     console.error('Failed to load events from API', err)
@@ -36,36 +38,32 @@ export function saveEvents(events) {
  * @returns {Promise<Object>} The created event
  */
 export async function createEvent({ title, description, startDate, endDate, startTime, endTime, category }) {
-  const now = new Date().toISOString()
   const eventData = {
-    id: uuidv4(),
     title: title || 'Untitled',
     description: description || '',
-    created_at: now,
-    done: false,
     startDate: normalizeDateToISO(startDate),
     endDate: normalizeDateToISO(endDate),
     startTime: startTime || '',
     endTime: endTime || '',
-    category: category || ''
+    category: category || '',
+    done: false
   }
 
   try {
     const response = await fetch(`${API_BASE}/events`, {
       method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
+      headers: { 'Content-Type': 'application/json' },
       body: JSON.stringify(eventData)
     })
-    console.log(response)
+    
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Create event failed:', errorText)
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
     const result = await response.json()
-    // Backend returns event directly, not wrapped in { event: {...} }
-    return result
+    return result // Already in camelCase
   } catch (err) {
     console.error('Failed to create event', err)
     throw err
@@ -82,19 +80,18 @@ export async function updateEvent(eventId, eventData) {
   try {
     const response = await fetch(`${API_BASE}/events/${eventId}`, {
       method: 'PUT',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify(eventData)
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify(eventData) // Send as-is
     })
 
     if (!response.ok) {
+      const errorText = await response.text()
+      console.error('Update event failed:', errorText)
       throw new Error(`HTTP error! status: ${response.status}`)
     }
 
     const result = await response.json()
-    // Backend returns event directly, not wrapped in { event: {...} }
-    return result
+    return result // Already in camelCase
   } catch (err) {
     console.error('Failed to update event', err)
     throw err

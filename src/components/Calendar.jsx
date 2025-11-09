@@ -1,5 +1,4 @@
 import React, { useState, useMemo } from 'react'
-import { getCategoryById } from '../store/events'
 
 //Month grid where events are displayed
 function getMonthGrid(year, month) {
@@ -96,7 +95,7 @@ export default function Calendar({ events = [], filterCategory, onFilterChange, 
           Category:
           <select value={filterCategory} onChange={e => onFilterChange(e.target.value)}>
             <option value="all">All</option>
-            {categories.map(c => (
+            {(categories || []).map(c => (
               <option key={c.id} value={c.id}>
                 {c.name}
               </option>
@@ -119,7 +118,7 @@ export default function Calendar({ events = [], filterCategory, onFilterChange, 
                 {d && <div className="day-num">{d.getDate()}</div>}
                 <div className="day-events">
                 {dayEvents.map(ev => {
-                  const category = getCategoryById(ev.category)
+                  const category = categories.find(c => c.id === ev.category) || null
                   let timeDisplay = ''
                   if (ev.startTime) {
                     timeDisplay = ev.startTime.substring(0, 5)

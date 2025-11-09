@@ -18,7 +18,16 @@ export default function EventForm({ onCreate, onUpdate, editing, onCancel }) {
 
   useEffect(() => {
     // Load categories on mount
-    setCategories(loadCategories())
+    async function fetchCategories() {
+      try {
+        const cats = await loadCategories()
+        setCategories(Array.isArray(cats) ? cats : [])
+      } catch (error) {
+        console.error('Error loading categories:', error)
+        setCategories([])
+      }
+    }
+    fetchCategories()
   }, [])
 
   useEffect(() => {
@@ -41,16 +50,20 @@ export default function EventForm({ onCreate, onUpdate, editing, onCancel }) {
     }
   }, [editing])
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     // Prevent the browser's default form submission so we can handle it in React
     e.preventDefault()
-    if (editing) {
-      onUpdate(editing.id, { title, description, startDate, endDate, startTime, endTime, category })
-    } else {
-      const ev = createEvent({ title, description, startDate, endDate, startTime, endTime, category })
-      onCreate(ev)
+    try {
+      if (editing) {
+        onUpdate(editing.id, { title, description, startDate, endDate, startTime, endTime, category })
+      } else {
+        const ev = await createEvent({ title, description, startDate, endDate, startTime, endTime, category })
+        onCreate(ev)
+      }
+      clear()
+    } catch (error) {
+      console.error('Error submitting event:', error)
     }
-    clear()
   }
 
   function clear() {
@@ -75,14 +88,18 @@ export default function EventForm({ onCreate, onUpdate, editing, onCancel }) {
     setCategory(val)
   }
 
-  function handleCreateCategory(e) {
+  async function handleCreateCategory(e) {
     e.preventDefault()
     if (!newCatName.trim()) return
-    const cat = createCategory({ name: newCatName.trim(), color: newCatColor })
-    const updated = loadCategories()
-    setCategories(updated)
-    setCategory(cat.id)
-    setShowCreateModal(false)
+    try {
+      const cat = await createCategory({ name: newCatName.trim(), color: newCatColor })
+      const updated = await loadCategories()
+      setCategories(Array.isArray(updated) ? updated : [])
+      setCategory(cat.id)
+      setShowCreateModal(false)
+    } catch (error) {
+      console.error('Error creating category:', error)
+    }
   }
 
   return (
@@ -119,13 +136,13 @@ export default function EventForm({ onCreate, onUpdate, editing, onCancel }) {
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <select value={category} onChange={handleCategoryChange} style={{ flex: 1 }}>
               <option value="">None</option>
-              {categories.map(c => (
+              {(categories || []).map(c => (
                 <option value={c.id} key={c.id}>{c.name}</option>
               ))}
               <option value="__create__">+ Create new category...</option>
             </select>
             {category && (() => {
-              const sel = categories.find(c => c.id === category)
+              const sel = (categories || []).find(c => c.id === category)
               if (sel) {
                 return (
                   <span 
