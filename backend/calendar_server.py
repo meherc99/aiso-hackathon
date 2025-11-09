@@ -26,12 +26,22 @@ class CalendarStore:
         self._db = get_default_db()
 
     @staticmethod
+    def _normalize_category(value: Optional[str]) -> str:
+        if not value:
+            return "work"
+        normalized = str(value).strip().lower()
+        return "personal" if normalized == "personal" else "work"
+
+    @staticmethod
     def _meeting_to_event(meeting: Dict[str, Any]) -> Dict[str, Any]:
         if not meeting:
             return {}
 
         start_date = meeting.get("date_of_meeting") or ""
         end_date = meeting.get("end_date") or start_date
+        start_time = meeting.get("start_time") or meeting.get("time") or ""
+        end_time = meeting.get("end_time") or ""
+        category = CalendarStore._normalize_category(meeting.get("category"))
 
         return {
             "id": meeting.get("id"),
@@ -39,9 +49,9 @@ class CalendarStore:
             "description": meeting.get("description") or "",
             "startDate": start_date,
             "endDate": end_date,
-            "startTime": meeting.get("start_time") or "",
-            "endTime": meeting.get("end_time") or "",
-            "category": meeting.get("category") or "",
+            "startTime": start_time,
+            "endTime": end_time,
+            "category": category,
             "done": bool(meeting.get("meeting_completed", False)),
             "created_at": meeting.get("created_at"),
         }
@@ -75,6 +85,22 @@ class CalendarStore:
             done_value = existing.get("meeting_completed", False)
 
         meeting_completed = bool(done_value)
+        start_time = (
+            event.get("startTime")
+            or event.get("start_time")
+            or event.get("time")
+            or existing.get("start_time")
+            or ""
+        )
+        end_time = (
+            event.get("endTime")
+            or event.get("end_time")
+            or existing.get("end_time")
+            or ""
+        )
+        category = CalendarStore._normalize_category(
+            event.get("category") or existing.get("category")
+        )
 
         return {
             "id": meeting_id,
@@ -82,11 +108,12 @@ class CalendarStore:
             "description": event.get("description", existing.get("description", "")),
             "date_of_meeting": start_date,
             "end_date": end_date,
-            "start_time": event.get("startTime", existing.get("start_time", "")),
-            "end_time": event.get("endTime", existing.get("end_time", "")),
-            "category": event.get("category", existing.get("category", "")),
+            "start_time": start_time,
+            "end_time": end_time,
+            "category": category,
             "created_at": created_at,
             "meeting_completed": meeting_completed,
+            "time": start_time,
         }
 
     def create_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
@@ -109,7 +136,32 @@ class CalendarStore:
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List all events, optionally filtered by date range."""
-        meetings = self._db.get_all_meetings()
+        raw_meetings = self._db.get_all_meetings()
+        meetings: List[Dict[str, Any]] = []
+
+        for meeting in raw_meetings:
+            if not meeting:
+                continue
+            updates: Dict[str, Any] = {}
+
+            normalised_category = self._normalize_category(meeting.get("category"))
+            if meeting.get("category") != normalised_category:
+                meeting["category"] = normalised_category
+                updates["category"] = normalised_category
+
+            start_time = meeting.get("start_time") or meeting.get("time") or ""
+            if meeting.get("start_time") != start_time:
+                meeting["start_time"] = start_time
+                updates["start_time"] = start_time
+            if meeting.get("time") is not None and meeting.get("time") != start_time:
+                meeting["time"] = start_time
+                updates["time"] = start_time
+
+            if updates and meeting.get("id"):
+                self._db.update_meeting(meeting["id"], updates)
+
+            meetings.append(meeting)
+
         meetings.sort(key=lambda m: (m.get("date_of_meeting") or "", m.get("start_time") or ""))
 
         if start_date and end_date:

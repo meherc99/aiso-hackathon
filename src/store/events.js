@@ -1,5 +1,3 @@
-import { v4 as uuidv4 } from 'uuid'
-
 const API_BASE = import.meta.env.VITE_CALENDAR_API ?? 'http://localhost:5050/api'
 
 async function request(path, options = {}) {
@@ -28,7 +26,20 @@ async function request(path, options = {}) {
 // ============================================================================
 
 export async function loadEvents() {
-  return request('/events')
+  const events = await request('/events')
+  return Array.isArray(events)
+    ? events.map(ev => {
+        const startTime = ev.startTime || ev.start_time || ev.time || ''
+        const rawCategory = typeof ev.category === 'string' ? ev.category.toLowerCase() : ''
+        const category = rawCategory === 'personal' ? 'personal' : 'work'
+        return {
+          ...ev,
+          category,
+          startTime,
+          time: startTime,
+        }
+      })
+    : []
 }
 
 export async function createEvent(payload) {
@@ -52,20 +63,15 @@ export async function deleteEvent(eventId) {
 }
 
 // ============================================================================
-// Category helpers (still stored locally)
+// Category helpers
 // ============================================================================
 
-const CAT_KEY = 'simple_calendar_categories_v1'
+const DEFAULT_CATEGORIES = [
+  { id: 'work', name: 'Work', color: '#3089ce' },
+  { id: 'personal', name: 'Personal', color: '#41ba49' },
+]
 
-function readCategoryStore() {
-  try {
-    const raw = localStorage.getItem(CAT_KEY)
-    return raw ? JSON.parse(raw) : []
-  } catch (err) {
-    console.error('Failed to read categories', err)
-    return []
-  }
-}
+const CAT_KEY = 'simple_calendar_categories_v1'
 
 function writeCategoryStore(categories) {
   try {
@@ -75,58 +81,41 @@ function writeCategoryStore(categories) {
   }
 }
 
-function ensureDefaultCategories(categories) {
-  const exists = (name) => categories.find(c => c.name.toLowerCase() === name.toLowerCase())
-  const updated = [...categories]
-
-  if (!exists('Work')) {
-    updated.push({ id: 'work', name: 'Work', color: '#3089ce' })
-  }
-  if (!exists('Personal')) {
-    updated.push({ id: 'personal', name: 'Personal', color: '#41ba49' })
-  }
-  return updated
-}
-
 export function loadCategories() {
-  const categories = ensureDefaultCategories(readCategoryStore())
-  writeCategoryStore(categories)
-  return categories
+  writeCategoryStore(DEFAULT_CATEGORIES)
+  return DEFAULT_CATEGORIES
 }
 
 export function createCategory(categoryData) {
-  const categories = loadCategories()
-  const id = categoryData?.id || uuidv4()
-  const category = {
-    id,
-    name: categoryData?.name ? String(categoryData.name) : 'Unnamed',
-    color: categoryData?.color ? String(categoryData.color) : '#666666',
+  const candidate = (categoryData?.id || categoryData?.name || '').toString().toLowerCase()
+  if (candidate === 'personal') {
+    return DEFAULT_CATEGORIES[1]
   }
-  const updated = [...categories.filter(c => c.id !== id), category]
-  writeCategoryStore(updated)
-  return category
+  if (candidate === 'work') {
+    return DEFAULT_CATEGORIES[0]
+  }
+  console.warn('Custom categories are disabled; defaulting to Work.')
+  return DEFAULT_CATEGORIES[0]
 }
 
 export function getCategoryById(categoryId) {
   if (!categoryId) return null
-  const categories = loadCategories()
-  return categories.find(c => c.id === categoryId) || null
+  return DEFAULT_CATEGORIES.find(c => c.id === categoryId) || null
 }
 
 export function buildCategoryMap(categories = [], events = []) {
   const map = Object.create(null)
-  categories.forEach(cat => {
+  const source = Array.isArray(categories) && categories.length > 0 ? categories : DEFAULT_CATEGORIES
+  source.forEach(cat => {
     map[cat.id] = cat
   })
 
   events.forEach(event => {
-    const key = event?.category
-    if (!key) return
+    const key = event?.category === 'personal' ? 'personal' : 'work'
     if (!map[key]) {
-      map[key] = {
-        id: key,
-        name: key.charAt(0).toUpperCase() + key.slice(1),
-        color: '#64748b',
+      const fallback = DEFAULT_CATEGORIES.find(cat => cat.id === key)
+      if (fallback) {
+        map[key] = fallback
       }
     }
   })

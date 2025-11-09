@@ -145,10 +145,12 @@ class FriendlyAIWrapper:
                         "content": (
                             "You are an assistant that extracts calendar instructions. "
                             "Respond ONLY with JSON containing: "
-                            '{"action":"none|create|delete","title":"","description":"","date":"","start_time":"","end_time":"","event_id":""}. '
+                            '{"action":"none|create|delete|reschedule","title":"","description":"","date":"","start_time":"","end_time":"","event_id":"","category":"","new_title":"","new_description":"","new_date":"","new_start_time":"","new_end_time":"","new_category":""}. '
                             "Use ISO 8601 date (YYYY-MM-DD) and 24-hour HH:MM time in the user's locale. "
                             "If the user does not specify a time, leave start_time empty. "
                             "If deleting, populate event_id if provided; otherwise fill title/date fields as clues. "
+                            "If rescheduling, fill both the original fields (title/date/start_time) so the existing meeting can be found, and provide the new_* fields with updated information (leave new_* blank if unchanged). "
+                            "Set category to 'work' for work/professional commitments (including Slack-derived meetings) and 'personal' for leisure/free-time plans like hobbies, social events, or appointments. Use new_category when the rescheduled meeting should change category. "
                             "If no calendar action is needed, set action to 'none'."
                         ),
                     },
@@ -174,7 +176,7 @@ class FriendlyAIWrapper:
         if not isinstance(data, dict):
             return None
         action = data.get("action")
-        if action not in {"create", "delete", "none"}:
+        if action not in {"create", "delete", "reschedule", "none"}:
             return None
         logger.debug("Model calendar action: %s", data)
         return data

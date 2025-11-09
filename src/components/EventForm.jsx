@@ -1,18 +1,21 @@
 import React, { useEffect, useMemo, useState } from 'react'
 
-export default function EventForm({ events = [], categories = [], onCreate, onUpdate, editing, onCancel, onCreateCategory }) {
+export default function EventForm({ events = [], categories = [], onCreate, onUpdate, editing, onCancel }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [startDate, setStartDate] = useState('')
   const [endDate, setEndDate] = useState('')
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
-  const [category, setCategory] = useState('')
-  
-  // Create-new-category modal state
-  const [showCreateModal, setShowCreateModal] = useState(false)
-  const [newCatName, setNewCatName] = useState('')
-  const [newCatColor, setNewCatColor] = useState('#3b82f6')
+  const [category, setCategory] = useState('work')
+
+  const fallbackCategory = useMemo(() => {
+    if (!Array.isArray(categories) || categories.length === 0) {
+      return 'work'
+    }
+    const preferred = categories.find(cat => cat.id === 'work') ?? categories[0]
+    return preferred?.id || 'work'
+  }, [categories])
 
   useEffect(() => {
     if (editing) {
@@ -22,7 +25,7 @@ export default function EventForm({ events = [], categories = [], onCreate, onUp
       setEndDate(editing.endDate || '')
       setStartTime(editing.startTime || '')
       setEndTime(editing.endTime || '')
-      setCategory(editing.category || '')
+      setCategory(editing.category || fallbackCategory)
     } else {
       setTitle('')
       setDescription('')
@@ -30,9 +33,9 @@ export default function EventForm({ events = [], categories = [], onCreate, onUp
       setEndDate('')
       setStartTime('')
       setEndTime('')
-      setCategory('')
+      setCategory(fallbackCategory)
     }
-  }, [editing])
+  }, [editing, fallbackCategory])
 
   const timedEvents = useMemo(() => Array.isArray(events) ? events : [], [events])
 
@@ -89,7 +92,8 @@ export default function EventForm({ events = [], categories = [], onCreate, onUp
     // Prevent the browser's default form submission so we can handle it in React
     e.preventDefault()
 
-    const payload = { title, description, startDate, endDate, startTime, endTime, category }
+    const safeCategory = category || fallbackCategory
+    const payload = { title, description, startDate, endDate, startTime, endTime, category: safeCategory }
 
     if (!startDate) {
       window.alert('Please select a start date for the event.')
@@ -121,34 +125,12 @@ export default function EventForm({ events = [], categories = [], onCreate, onUp
     setEndDate('')
     setStartTime('')
     setEndTime('')
-    setCategory('')
+    setCategory(fallbackCategory)
     if (onCancel) onCancel()
   }
 
   function handleCategoryChange(e) {
-    const val = e.target.value
-    if (val === '__create__') {
-      setNewCatName('')
-      setNewCatColor('#3b82f6')
-      setShowCreateModal(true)
-      return
-    }
-    setCategory(val)
-  }
-
-  async function handleCreateCategorySubmit(e) {
-    e.preventDefault()
-    if (!newCatName.trim()) return
-    try {
-      const created = await onCreateCategory?.({ name: newCatName.trim(), color: newCatColor })
-      if (created) {
-        setCategory(created.id)
-      }
-      setShowCreateModal(false)
-    } catch (err) {
-      console.error('Failed to create category', err)
-      window.alert('Failed to create category. See console for details.')
-    }
+    setCategory(e.target.value)
   }
 
   return (
@@ -184,11 +166,9 @@ export default function EventForm({ events = [], categories = [], onCreate, onUp
         <label>Category
           <div style={{ display: 'flex', alignItems: 'center', gap: '8px' }}>
             <select value={category} onChange={handleCategoryChange} style={{ flex: 1 }}>
-              <option value="">None</option>
               {categories.map(c => (
                 <option value={c.id} key={c.id}>{c.name}</option>
               ))}
-              <option value="__create__">+ Create new category...</option>
             </select>
             {category && (() => {
               const sel = categories.find(c => c.id === category)
@@ -218,86 +198,6 @@ export default function EventForm({ events = [], categories = [], onCreate, onUp
           {editing ? <button type="button" className="btn" onClick={clear}>Cancel</button> : <button type="button" className="btn" onClick={clear}>Clear</button>}
         </div>
       </form>
-
-      {showCreateModal && (
-      <div 
-        className="modal-backdrop" 
-        style={{
-          position: 'fixed',
-          top: 0,
-          left: 0,
-          right: 0,
-          bottom: 0,
-          background: 'rgba(0,0,0,0.5)',
-          display: 'flex',
-          alignItems: 'center',
-          justifyContent: 'center',
-          zIndex: 1000
-        }}
-        onClick={() => setShowCreateModal(false)}
-      >
-        <div 
-          className="modal-content"
-          style={{
-            background: '#fff',
-            padding: '24px',
-            borderRadius: '8px',
-            width: '90%',
-            maxWidth: '400px',
-            boxShadow: '0 4px 6px rgba(0,0,0,0.1)'
-          }}
-          onClick={e => e.stopPropagation()}
-        >
-          <h3 style={{ marginTop: 0 }}>Create New Category</h3>
-          <form onSubmit={handleCreateCategorySubmit}>
-            <label style={{ display: 'block', marginBottom: '16px' }}>
-              <div style={{ marginBottom: '4px', fontWeight: 500 }}>Category Name</div>
-              <input 
-                type="text"
-                value={newCatName} 
-                onChange={e => setNewCatName(e.target.value)} 
-                placeholder="e.g., Work, Personal"
-                required 
-                style={{ width: '100%', padding: '8px', boxSizing: 'border-box' }}
-                autoFocus
-              />
-            </label>
-            
-            <label style={{ display: 'block', marginBottom: '16px' }}>
-              <div style={{ marginBottom: '4px', fontWeight: 500 }}>Color</div>
-              <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
-                <input 
-                  type="color" 
-                  value={newCatColor} 
-                  onChange={e => setNewCatColor(e.target.value)}
-                  style={{ width: '60px', height: '40px', border: 'none', cursor: 'pointer' }}
-                />
-                <input 
-                  type="text"
-                  value={newCatColor}
-                  onChange={e => setNewCatColor(e.target.value)}
-                  pattern="^#[0-9A-Fa-f]{6}$"
-                  style={{ flex: 1, padding: '8px', fontFamily: 'monospace' }}
-                />
-              </div>
-            </label>
-            
-            <div style={{ display: 'flex', gap: '8px', justifyContent: 'flex-end' }}>
-              <button 
-                type="button" 
-                onClick={() => setShowCreateModal(false)}
-                className="btn"
-              >
-                Cancel
-              </button>
-              <button type="submit" className="btn primary">
-                Create
-              </button>
-            </div>
-          </form>
-        </div>
-      </div>
-    )}
     </>
   )
 }

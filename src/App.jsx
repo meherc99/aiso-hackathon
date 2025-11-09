@@ -3,7 +3,7 @@ import Calendar from './components/Calendar'
 import EventForm from './components/EventForm'
 import EventList from './components/EventList'
 import EventDetailModal from './components/EventDetailModal'
-import { loadEvents, createEvent, updateEvent, deleteEvent, loadCategories, createCategory, buildCategoryMap } from './store/events'
+import { loadEvents, createEvent, updateEvent, deleteEvent, loadCategories, buildCategoryMap } from './store/events'
 
 export default function App() {
   const [events, setEvents] = useState([])
@@ -140,13 +140,6 @@ export default function App() {
     }
   }
 
-  async function handleCreateCategory(data) {
-    const created = createCategory(data)
-    const next = loadCategories()
-    setCategories(next)
-    return created
-  }
-
   function handleViewEvent(event) {
     setViewingEvent(event)
   }
@@ -174,7 +167,6 @@ export default function App() {
             categories={categoryOptions}
             onCreate={handleCreate}
             onUpdate={handleUpdate}
-            onCreateCategory={handleCreateCategory}
             editing={editing}
             onCancel={() => setEditing(null)}
           />
