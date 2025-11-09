@@ -59,8 +59,8 @@ python start_all_services.py
 The helper script:
 
 * builds/serves the React calendar (via Vite dev server),
-* runs the calendar REST API on **http://localhost:5050**,
-* launches the Gradio chatbot on **http://localhost:7860**,
+* runs the calendar REST API on **http://localhost:5050**, 
+* launches the Gradio chatbot on **http://localhost:7860**,(make sure the ports are available for chatbot and calendar API, if other application(s) are running on them, close them.)
 * kicks off the master scheduler (Slack agent + meeting reminders).
 
 You’ll see tabbed logs for each component in the terminal.
@@ -145,19 +145,48 @@ python backend/master_scheduler.py
 ## 8. Repository Structure (Highlights)
 
 ```
-backend/
-  agent.py                  # Slack ingestion
-  calendar_server.py        # REST API
-  check_meetings.py         # OpenAI meeting extraction
-  check_upcoming_and_notify.py  # Slack reminders
-  master_scheduler.py       # Agent + reminder orchestrator
-frontend/
-  chatbot.py                # Gradio assistant
-  storage.py                # Conversation persistence
-src/                        # React calendar
-start_all_services.py       # Convenience launcher
+backend/                                      # main backend folder
+   ├── agent.py                                  # orchestrates agent tasks
+   ├── CALENDAR_SERVER.md                         # calendar server docs
+   ├── calendar_server.py                         # calendar server implementation
+   ├── check_meetings.py                          # validate meetings
+   ├── check_models.py                            # model integrity checks
+   ├── check_upcoming_and_email.py                # send email for upcoming meetings
+   ├── check_upcoming_and_notify.py               # send notifications for upcoming meetings
+   ├── database.py                                # db connection and helpers
+   ├── master_scheduler.py                        # coordinates schedulers
+   ├── meeting_reminder_scheduler.py              # reminder scheduling logic
+   ├── notify_cron.py                             # cron entrypoint for notifications
+   ├── openai_wrapper.py                           # OpenAI API wrapper utilities
+   ├── parse_messages.py                           # parsing and normalization of messages
+   ├── scheduler.py                                # scheduling utilities / jobs
+   └── slack.py                                    # Slack integration helpers
+frontend/                                           # main frontend folder
+   ├── ai_wrapper.py                              # wraps AI/chat backend calls
+   ├── chatbot.py                                 # chatbot UI entry/component
+   ├── chat_logic.py                               # chat state and message handling
+   ├── storage.py                                  # local/session storage for chat data
+   └── static/
+       └── chatbot.css                             # chatbot styling
+src
+   ├──components/                                # main UI components
+      ├── Calendar.jsx                               # calendar view / month-week view
+      ├── EventDetailModal.jsx                        # modal showing event details
+      ├── EventForm.jsx                               # form for creating/editing events
+      └── EventList.jsx                               # sidebar/list of upcoming events
+   ├──store/
+      ├──events.js                                 # Manages creation, editing, and display of calendar events
+   App.jsx
+   index.html                                    # Main HTML entry — mounts the frontend app, links scripts and global styles
+   main.jsx
+   package-lock.json
+   package.json
+   styles.css
+   
+   
 ```
 
 ---
 
 That’s it—launch the services, open http://localhost:7860 for the chatbot, http://localhost:5050 for the calendar, and invite your Slack bot to a channel to watch meetings get captured automatically. Happy hacking! 🚀
+
