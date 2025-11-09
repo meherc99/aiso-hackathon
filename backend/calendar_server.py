@@ -7,9 +7,7 @@ This server provides:
 - CORS support for integration with Gradio frontend
 """
 
-import json
 import os
-import sqlite3
 import uuid
 from datetime import datetime
 from pathlib import Path
@@ -18,95 +16,92 @@ from typing import Any, Dict, List, Optional
 from flask import Flask, jsonify, request, send_from_directory
 from flask_cors import CORS
 
+from database import get_default_db
+
 
 class CalendarStore:
-    """Manage calendar events in SQLite database."""
+    """Manage calendar events using the JSON database."""
 
-    def __init__(self, db_path: Optional[Path] = None) -> None:
-        if db_path is None:
-            db_path = Path(__file__).resolve().parent.parent / "frontend" / "conversations.db"
-        self._db_path = db_path
-        self._conn = sqlite3.connect(self._db_path, check_same_thread=False)
-        self._conn.row_factory = sqlite3.Row
-        self._init_schema()
+    def __init__(self) -> None:
+        self._db = get_default_db()
 
-    def _init_schema(self) -> None:
-        """Initialize events table in the database."""
-        with self._conn:
-            self._conn.execute(
-                """
-                CREATE TABLE IF NOT EXISTS events (
-                    id TEXT PRIMARY KEY,
-                    title TEXT NOT NULL,
-                    description TEXT,
-                    startDate TEXT NOT NULL,
-                    endDate TEXT NOT NULL,
-                    startTime TEXT,
-                    endTime TEXT,
-                    category TEXT,
-                    done INTEGER DEFAULT 0,
-                    created_at TEXT NOT NULL,
-                    updated_at TEXT NOT NULL
-                )
-                """
-            )
+    @staticmethod
+    def _meeting_to_event(meeting: Dict[str, Any]) -> Dict[str, Any]:
+        if not meeting:
+            return {}
+
+        start_date = meeting.get("date_of_meeting") or ""
+        end_date = meeting.get("end_date") or start_date
+
+        return {
+            "id": meeting.get("id"),
+            "title": meeting.get("title", "Untitled Event"),
+            "description": meeting.get("description") or "",
+            "startDate": start_date,
+            "endDate": end_date,
+            "startTime": meeting.get("start_time") or "",
+            "endTime": meeting.get("end_time") or "",
+            "category": meeting.get("category") or "",
+            "done": bool(meeting.get("meeting_completed", False)),
+            "created_at": meeting.get("created_at"),
+        }
+
+    @staticmethod
+    def _event_to_meeting(
+        event: Dict[str, Any],
+        existing: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        existing = existing or {}
+
+        meeting_id = event.get("id") or existing.get("id") or str(uuid.uuid4())
+        start_date = (
+            event.get("startDate")
+            or event.get("date_of_meeting")
+            or existing.get("date_of_meeting")
+        )
+
+        if not start_date:
+            raise ValueError("startDate is required")
+
+        end_date = event.get("endDate") or event.get("end_date") or start_date
+        created_at = (
+            existing.get("created_at")
+            or event.get("created_at")
+            or datetime.utcnow().isoformat()
+        )
+
+        done_value = event.get("done")
+        if done_value is None:
+            done_value = existing.get("meeting_completed", False)
+
+        meeting_completed = bool(done_value)
+
+        return {
+            "id": meeting_id,
+            "title": event.get("title", existing.get("title", "Untitled Event")),
+            "description": event.get("description", existing.get("description", "")),
+            "date_of_meeting": start_date,
+            "end_date": end_date,
+            "start_time": event.get("startTime", existing.get("start_time", "")),
+            "end_time": event.get("endTime", existing.get("end_time", "")),
+            "category": event.get("category", existing.get("category", "")),
+            "created_at": created_at,
+            "meeting_completed": meeting_completed,
+        }
 
     def create_event(self, event_data: Dict[str, Any]) -> Dict[str, Any]:
         """Create a new calendar event."""
-        event_id = event_data.get("id") or str(uuid.uuid4())
-        now = datetime.now().isoformat()
-        
-        event = {
-            "id": event_id,
-            "title": event_data.get("title", "Untitled Event"),
-            "description": event_data.get("description", ""),
-            "startDate": event_data.get("startDate", ""),
-            "endDate": event_data.get("endDate", ""),
-            "startTime": event_data.get("startTime", ""),
-            "endTime": event_data.get("endTime", ""),
-            "category": event_data.get("category", ""),
-            "done": 1 if event_data.get("done") else 0,
-            "created_at": now,
-            "updated_at": now,
-        }
-
-        with self._conn:
-            self._conn.execute(
-                """
-                INSERT INTO events (
-                    id, title, description, startDate, endDate,
-                    startTime, endTime, category, done, created_at, updated_at
-                ) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
-                """,
-                (
-                    event["id"],
-                    event["title"],
-                    event["description"],
-                    event["startDate"],
-                    event["endDate"],
-                    event["startTime"],
-                    event["endTime"],
-                    event["category"],
-                    event["done"],
-                    event["created_at"],
-                    event["updated_at"],
-                ),
-            )
-        
-        # Convert done back to boolean for response
-        event["done"] = bool(event["done"])
-        return event
+        meeting = self._event_to_meeting(event_data)
+        self._db.add_meeting(meeting)
+        stored = self._db.get_meeting_by_id(meeting["id"])
+        return self._meeting_to_event(stored)
 
     def get_event(self, event_id: str) -> Optional[Dict[str, Any]]:
         """Retrieve a single event by ID."""
-        row = self._conn.execute(
-            "SELECT * FROM events WHERE id = ?", (event_id,)
-        ).fetchone()
-        
-        if not row:
+        meeting = self._db.get_meeting_by_id(event_id)
+        if not meeting:
             return None
-        
-        return self._row_to_dict(row)
+        return self._meeting_to_event(meeting)
 
     def list_events(
         self,
@@ -114,91 +109,38 @@ class CalendarStore:
         end_date: Optional[str] = None,
     ) -> List[Dict[str, Any]]:
         """List all events, optionally filtered by date range."""
+        meetings = self._db.get_all_meetings()
+        meetings.sort(key=lambda m: (m.get("date_of_meeting") or "", m.get("start_time") or ""))
+
         if start_date and end_date:
-            rows = self._conn.execute(
-                """
-                SELECT * FROM events
-                WHERE startDate >= ? AND endDate <= ?
-                ORDER BY startDate, startTime
-                """,
-                (start_date, end_date),
-            ).fetchall()
-        else:
-            rows = self._conn.execute(
-                "SELECT * FROM events ORDER BY startDate, startTime"
-            ).fetchall()
-        
-        return [self._row_to_dict(row) for row in rows]
+            def _within_range(meeting: Dict[str, Any]) -> bool:
+                date_value = meeting.get("date_of_meeting")
+                return bool(date_value) and start_date <= date_value <= end_date
+
+            meetings = [meeting for meeting in meetings if _within_range(meeting)]
+
+        return [self._meeting_to_event(meeting) for meeting in meetings]
 
     def update_event(self, event_id: str, event_data: Dict[str, Any]) -> Optional[Dict[str, Any]]:
         """Update an existing event."""
-        existing = self.get_event(event_id)
-        if not existing:
+        existing_meeting = self._db.get_meeting_by_id(event_id)
+        if not existing_meeting:
             return None
 
-        now = datetime.now().isoformat()
-        
-        # Update only provided fields
-        updated = {
-            "title": event_data.get("title", existing["title"]),
-            "description": event_data.get("description", existing["description"]),
-            "startDate": event_data.get("startDate", existing["startDate"]),
-            "endDate": event_data.get("endDate", existing["endDate"]),
-            "startTime": event_data.get("startTime", existing["startTime"]),
-            "endTime": event_data.get("endTime", existing["endTime"]),
-            "category": event_data.get("category", existing["category"]),
-            "done": 1 if event_data.get("done", existing["done"]) else 0,
-            "updated_at": now,
-        }
+        current_event = self._meeting_to_event(existing_meeting)
+        current_event.update(event_data)
 
-        with self._conn:
-            self._conn.execute(
-                """
-                UPDATE events SET
-                    title = ?, description = ?, startDate = ?, endDate = ?,
-                    startTime = ?, endTime = ?, category = ?, done = ?, updated_at = ?
-                WHERE id = ?
-                """,
-                (
-                    updated["title"],
-                    updated["description"],
-                    updated["startDate"],
-                    updated["endDate"],
-                    updated["startTime"],
-                    updated["endTime"],
-                    updated["category"],
-                    updated["done"],
-                    updated["updated_at"],
-                    event_id,
-                ),
-            )
-        
-        updated["id"] = event_id
-        updated["done"] = bool(updated["done"])
-        updated["created_at"] = existing["created_at"]
-        return updated
+        meeting_payload = self._event_to_meeting(current_event, existing=existing_meeting)
+        updated = self._db.update_meeting(event_id, meeting_payload)
+        if not updated:
+            return None
+        return self._meeting_to_event(updated)
 
     def delete_event(self, event_id: str) -> bool:
         """Delete an event by ID."""
-        with self._conn:
-            cursor = self._conn.execute("DELETE FROM events WHERE id = ?", (event_id,))
-            return cursor.rowcount > 0
-
-    def _row_to_dict(self, row: sqlite3.Row) -> Dict[str, Any]:
-        """Convert a database row to a dictionary."""
-        return {
-            "id": row["id"],
-            "title": row["title"],
-            "description": row["description"],
-            "startDate": row["startDate"],
-            "endDate": row["endDate"],
-            "startTime": row["startTime"],
-            "endTime": row["endTime"],
-            "category": row["category"],
-            "done": bool(row["done"]),
-            "created_at": row["created_at"],
-            "updated_at": row["updated_at"],
-        }
+        if self._db.delete_meeting(event_id):
+            return True
+        return self._db.delete_task(event_id)
 
 
 # Initialize Flask app

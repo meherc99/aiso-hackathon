@@ -1,7 +1,6 @@
 import React, { useEffect, useMemo, useState } from 'react'
-import { createEvent, loadCategories, createCategory } from '../store/events'
 
-export default function EventForm({ events = [], onCreate, onUpdate, editing, onCancel }) {
+export default function EventForm({ events = [], categories = [], onCreate, onUpdate, editing, onCancel, onCreateCategory }) {
   const [title, setTitle] = useState('')
   const [description, setDescription] = useState('')
   const [startDate, setStartDate] = useState('')
@@ -9,17 +8,11 @@ export default function EventForm({ events = [], onCreate, onUpdate, editing, on
   const [startTime, setStartTime] = useState('')
   const [endTime, setEndTime] = useState('')
   const [category, setCategory] = useState('')
-  const [categories, setCategories] = useState([])
   
   // Create-new-category modal state
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [newCatName, setNewCatName] = useState('')
   const [newCatColor, setNewCatColor] = useState('#3b82f6')
-
-  useEffect(() => {
-    // Load categories on mount
-    setCategories(loadCategories())
-  }, [])
 
   useEffect(() => {
     if (editing) {
@@ -92,7 +85,7 @@ export default function EventForm({ events = [], onCreate, onUpdate, editing, on
     })
   }
 
-  function handleSubmit(e) {
+  async function handleSubmit(e) {
     // Prevent the browser's default form submission so we can handle it in React
     e.preventDefault()
 
@@ -108,13 +101,17 @@ export default function EventForm({ events = [], onCreate, onUpdate, editing, on
       return
     }
 
-    if (editing) {
-      onUpdate(editing.id, payload)
-    } else {
-      const ev = createEvent(payload)
-      onCreate(ev)
+    try {
+      if (editing) {
+        await onUpdate(editing.id, payload)
+      } else {
+        await onCreate(payload)
+      }
+      clear()
+    } catch (err) {
+      console.error('Failed to save event', err)
+      window.alert('Failed to save event. See console for details.')
     }
-    clear()
   }
 
   function clear() {
@@ -139,14 +136,19 @@ export default function EventForm({ events = [], onCreate, onUpdate, editing, on
     setCategory(val)
   }
 
-  function handleCreateCategory(e) {
+  async function handleCreateCategorySubmit(e) {
     e.preventDefault()
     if (!newCatName.trim()) return
-    const cat = createCategory({ name: newCatName.trim(), color: newCatColor })
-    const updated = loadCategories()
-    setCategories(updated)
-    setCategory(cat.id)
-    setShowCreateModal(false)
+    try {
+      const created = await onCreateCategory?.({ name: newCatName.trim(), color: newCatColor })
+      if (created) {
+        setCategory(created.id)
+      }
+      setShowCreateModal(false)
+    } catch (err) {
+      console.error('Failed to create category', err)
+      window.alert('Failed to create category. See console for details.')
+    }
   }
 
   return (
@@ -247,7 +249,7 @@ export default function EventForm({ events = [], onCreate, onUpdate, editing, on
           onClick={e => e.stopPropagation()}
         >
           <h3 style={{ marginTop: 0 }}>Create New Category</h3>
-          <form onSubmit={handleCreateCategory}>
+          <form onSubmit={handleCreateCategorySubmit}>
             <label style={{ display: 'block', marginBottom: '16px' }}>
               <div style={{ marginBottom: '4px', fontWeight: 500 }}>Category Name</div>
               <input 
