@@ -160,7 +160,7 @@ PANEL_CSS = """
     font-weight: 600;
     color: white;
     text-shadow: 0 2px 4px rgba(0, 0, 0, 0.2);
-    box-shadow: 
+    box-shadow:
         0 4px 15px rgba(0, 102, 255, 0.4),
         0 0 30px rgba(0, 204, 255, 0.3),
         inset 0 1px 0 rgba(255, 255, 255, 0.3);
@@ -189,18 +189,9 @@ PANEL_CSS = """
     animation: shimmer 3s infinite;
 }
 
-@keyframes shimmer {
-    0% {
-        transform: translateX(-100%) translateY(-100%) rotate(45deg);
-    }
-    100% {
-        transform: translateX(100%) translateY(100%) rotate(45deg);
-    }
-}
-
 #magic-ai-button:hover {
     transform: translateY(-2px);
-    box-shadow: 
+    box-shadow:
         0 6px 25px rgba(0, 102, 255, 0.6),
         0 0 50px rgba(0, 204, 255, 0.5),
         inset 0 1px 0 rgba(255, 255, 255, 0.4);
@@ -209,31 +200,16 @@ PANEL_CSS = """
 
 #magic-ai-button:active {
     transform: translateY(0px);
-    box-shadow: 
+    box-shadow:
         0 2px 10px rgba(0, 102, 255, 0.5),
         0 0 20px rgba(0, 204, 255, 0.4),
         inset 0 1px 0 rgba(255, 255, 255, 0.2);
 }
 
-/* Pulsing glow animation */
-@keyframes pulse-glow {
-    0%, 100% {
-        box-shadow: 
-            0 4px 15px rgba(0, 102, 255, 0.4),
-            0 0 30px rgba(0, 204, 255, 0.3),
-            inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    }
-    50% {
-        box-shadow: 
-            0 4px 20px rgba(0, 102, 255, 0.6),
-            0 0 45px rgba(0, 204, 255, 0.5),
-            inset 0 1px 0 rgba(255, 255, 255, 0.3);
-    }
-}
-
 #magic-ai-button {
     animation: pulse-glow 2s ease-in-out infinite;
 }
+
 </style>
 """
 
@@ -283,27 +259,6 @@ def _infer_category(action: dict | None, default: str = "work") -> str:
         return "personal"
 
     return default or "work"
-
-
-def conversation_list_update(selected_id: Optional[str], prioritize_selected: bool = False):
-    conversations = store.list_conversations()
-    if not conversations:
-        return gr.update(choices=[], value=None)
-
-    conversation_ids = [str(item.get("_id") or item.get("id")) for item in conversations]
-    if selected_id not in conversation_ids:
-        selected_id = conversation_ids[0]
-
-    choices = [
-        (item.get("title") or f"Conversation {index + 1}", str(item.get("_id") or item.get("id")))
-        for index, item in enumerate(conversations)
-    ]
-    if prioritize_selected and selected_id:
-        selected_choice = [choice for choice in choices if choice[1] == selected_id]
-        remaining_choices = [choice for choice in choices if choice[1] != selected_id]
-        choices = [*selected_choice, *remaining_choices]
-
-    return gr.update(choices=choices, value=selected_id)
 
 
 def fetch_calendar_events(_: Optional[str]) -> List[dict]:
@@ -803,23 +758,16 @@ def handle_user_message(
     message: str,
     history: List[Message],
     conversation_id: Optional[str],
-) -> Tuple[List[Message], str, str, Any, str, str]:
+) -> Tuple[List[Message], str, str, str, str]:
     history = history or []
     cleaned = message.strip()
 
-    created_now = False
-    if not conversation_id:
-        conversation_id = store.create_conversation()
-        created_now = True
+    conversation_id = conversation_id or store.default_conversation_id()
 
     if not cleaned:
-        sidebar_update = conversation_list_update(
-            conversation_id,
-            prioritize_selected=created_now,
-        )
         schedule_html = render_schedule(get_todays_events(conversation_id))
         tasks_html = render_tasks(fetch_task_list(conversation_id))
-        return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
+        return history, "", conversation_id, schedule_html, tasks_html
 
     store.append_message(conversation_id, "user", cleaned)
     bot_reply, calendar_action = build_bot_reply(cleaned, history)
@@ -827,89 +775,39 @@ def handle_user_message(
     if action_feedback:
         bot_reply = f"{bot_reply}\n\n{action_feedback}"
     store.append_message(conversation_id, "assistant", bot_reply)
-    store.update_title_if_missing(conversation_id, cleaned)
 
-    # Reload the full conversation history from storage to ensure consistency
     messages = store.fetch_messages(conversation_id)
     updated_history = messages_to_history(messages)
-
-    sidebar_update = conversation_list_update(
-        conversation_id,
-        prioritize_selected=created_now,
-    )
     schedule_html = render_schedule(get_todays_events(conversation_id))
     tasks_html = render_tasks(fetch_task_list(conversation_id))
-    return updated_history, "", conversation_id, sidebar_update, schedule_html, tasks_html
+    return updated_history, "", conversation_id, schedule_html, tasks_html
 
 
-def initialize_interface() -> Tuple[List[Message], str, str, Any, str, str]:
-    conversations = store.list_conversations()
-    if conversations:
-        conversation_id = str(conversations[0].get("_id") or conversations[0].get("id"))
-    else:
-        conversation_id = store.create_conversation()
-        conversations = store.list_conversations()
-
+def initialize_interface() -> Tuple[List[Message], str, str, str, str]:
+    conversation_id = store.default_conversation_id()
     messages = store.fetch_messages(conversation_id)
     history = messages_to_history(messages)
-    sidebar_update = conversation_list_update(conversation_id)
     schedule_html = render_schedule(get_todays_events(conversation_id))
     tasks_html = render_tasks(fetch_task_list(conversation_id))
-    return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
+    return history, "", conversation_id, schedule_html, tasks_html
 
 
-def start_new_conversation() -> Tuple[List[Message], str, str, Any, str, str]:
-    conversation_id = store.create_conversation()
-    sidebar_update = conversation_list_update(
-        conversation_id,
-        prioritize_selected=True,
-    )
-    schedule_html = render_schedule(get_todays_events(conversation_id))
-    tasks_html = render_tasks(fetch_task_list(conversation_id))
-    return [], "", conversation_id, sidebar_update, schedule_html, tasks_html
+def start_new_conversation() -> Tuple[List[Message], str, str, str, str]:
+    store.reset_conversation(store.default_conversation_id())
+    return initialize_interface()
 
 
 def clear_current_conversation(
     conversation_id: Optional[str],
-) -> Tuple[List[Message], str, str, Any, str, str]:
-    if conversation_id:
-        store.reset_conversation(conversation_id)
-        sidebar_update = conversation_list_update(conversation_id)
-        messages = store.fetch_messages(conversation_id)
-        history = messages_to_history(messages)
-        schedule_html = render_schedule(get_todays_events(conversation_id))
-        tasks_html = render_tasks(fetch_task_list(conversation_id))
-        return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
-
-    new_id = store.create_conversation()
-    sidebar_update = conversation_list_update(
-        new_id,
-        prioritize_selected=True,
-    )
-    schedule_html = render_schedule(get_todays_events(new_id))
-    tasks_html = render_tasks(fetch_task_list(new_id))
-    return [], "", new_id, sidebar_update, schedule_html, tasks_html
+) -> Tuple[List[Message], str, str, str, str]:
+    store.reset_conversation(store.default_conversation_id())
+    return initialize_interface()
 
 
 def load_conversation(
     conversation_id: Optional[str],
-) -> Tuple[List[Message], str, str, Any, str, str]:
-    if not conversation_id:
-        new_id = store.create_conversation()
-        sidebar_update = conversation_list_update(
-            new_id,
-            prioritize_selected=True,
-        )
-        schedule_html = render_schedule(get_todays_events(new_id))
-        tasks_html = render_tasks(fetch_task_list(new_id))
-        return [], "", new_id, sidebar_update, schedule_html, tasks_html
-
-    messages = store.fetch_messages(conversation_id)
-    history = messages_to_history(messages)
-    sidebar_update = conversation_list_update(conversation_id)
-    schedule_html = render_schedule(get_todays_events(conversation_id))
-    tasks_html = render_tasks(fetch_task_list(conversation_id))
-    return history, "", conversation_id, sidebar_update, schedule_html, tasks_html
+) -> Tuple[List[Message], str, str, str, str]:
+    return initialize_interface()
 
 
 def build_app() -> gr.Blocks:
@@ -925,17 +823,7 @@ def build_app() -> gr.Blocks:
             with gr.TabItem("Chat Assistant", id="chat_tab"):
                 with gr.Row(equal_height=True):
                     with gr.Column(scale=1, min_width=240, elem_classes=["sidebar-column"]):
-                        with gr.Column(elem_classes=["panel-card", "conversation-card"]):
-                            gr.Markdown("### Conversations", elem_classes=["sidebar-heading"])
-                            new_conversation_btn = gr.Button("New", size="sm", elem_classes=["sidebar-new-btn"])
-                            conversation_list = gr.Radio(
-                                label="",
-                                show_label=False,
-                                choices=[],
-                                value=None,
-                                interactive=True,
-                                container=True,
-                            )
+                        gr.HTML("&nbsp;")
 
                     with gr.Column(scale=4):
                         chatbot = gr.Chatbot(
@@ -943,17 +831,15 @@ def build_app() -> gr.Blocks:
                             height="80vh",
                             type="messages",
                         )
-                        
-                        # Magic AI Button
+
                         magic_button = gr.Button(
                             "AI Magic",
                             elem_id="magic-ai-button",
                             size="lg",
                             variant="primary"
                         )
-                        
+
                         with gr.Row():
-                            
                             message = gr.Textbox(
                                 show_label=False,
                                 placeholder="Send a message…",
@@ -962,7 +848,7 @@ def build_app() -> gr.Blocks:
                                 max_lines=3,
                                 scale=9,
                             )
-                            send = gr.Button("➤", size="sm", scale=1, min_width=50)  # Moved outside of gr.Group to align on the right
+                            send = gr.Button("➤", size="sm", scale=1, min_width=50)
 
                     with gr.Column(scale=2, min_width=260):
                         initial_schedule = render_schedule(get_todays_events(None))
@@ -1009,7 +895,6 @@ def build_app() -> gr.Blocks:
                 chatbot,
                 message,
                 conversation_state,
-                conversation_list,
                 schedule_panel,
                 tasks_panel,
             ],
@@ -1022,7 +907,6 @@ def build_app() -> gr.Blocks:
                 chatbot,
                 message,
                 conversation_state,
-                conversation_list,
                 schedule_panel,
                 tasks_panel,
             ],
@@ -1035,35 +919,6 @@ def build_app() -> gr.Blocks:
                 chatbot,
                 message,
                 conversation_state,
-                conversation_list,
-                schedule_panel,
-                tasks_panel,
-            ],
-            queue=False,
-        )
-
-        new_conversation_btn.click(
-            start_new_conversation,
-            inputs=None,
-            outputs=[
-                chatbot,
-                message,
-                conversation_state,
-                conversation_list,
-                schedule_panel,
-                tasks_panel,
-            ],
-            queue=False,
-        )
-
-        conversation_list.change(
-            load_conversation,
-            inputs=[conversation_list],
-            outputs=[
-                chatbot,
-                message,
-                conversation_state,
-                conversation_list,
                 schedule_panel,
                 tasks_panel,
             ],
