@@ -64,6 +64,25 @@ def find_upcoming_meetings(within_minutes: int = 15):
     return results
 
 
+def get_channel_members(channel_id: str, client: WebClient):
+    """
+    Get all members of a channel.
+    
+    Args:
+        channel_id: The Slack channel ID
+        client: WebClient instance
+        
+    Returns:
+        List of user IDs in the channel
+    """
+    try:
+        response = client.conversations_members(channel=channel_id)
+        return response.get("members", [])
+    except SlackApiError as e:
+        print(f"Error fetching channel members for {channel_id}: {e.response['error']}")
+        return []
+
+
 def send_slack_notification(channel_id: str, meeting: dict, dt: datetime, client: WebClient):
     """Send a Slack message to the specified channel about the upcoming meeting."""
     title = meeting.get("title", "Untitled Meeting")
@@ -90,8 +109,22 @@ def send_slack_notification(channel_id: str, meeting: dict, dt: datetime, client
         except Exception:
             pass
     
+    # Get all channel members and create mentions
+    members = get_channel_members(channel_id, client)
+    
+    # Get bot user ID to exclude it from mentions
+    bot_user_id = os.getenv("SLACK_BOT_USER_ID", "")
+    
+    # Filter out the bot itself from mentions
+    user_mentions = [f"<@{user_id}>" for user_id in members if user_id != bot_user_id]
+    
+    # Create mention string
+    mentions_string = " ".join(user_mentions) if user_mentions else ""
+    
     # Build message with Slack formatting
     message = f"""
+{mentions_string}
+
 *Upcoming Meeting Reminder*
 
 *Title:* {title}

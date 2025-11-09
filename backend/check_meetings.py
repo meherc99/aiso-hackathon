@@ -35,10 +35,7 @@ import openai
 
 
 def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) -> List[Dict[str, Any]]:
-    attempt = 0
-    max_retries = 3
-    try:
-        instruction = (
+    instruction = (
             "Don't switch to reasoning models. The date we are in is 2025-11-09, so make sure you correctly check current dates. To create the time_stamps and the dates, please look at the timestamps provided to you. The start time We have this conversation in a JSON format. Your task is to determine when a meeting should be scheduled, based on the messages. "
             "If multiple meetings are mentioned, you should return multiple json objects that follow the same pattern, but with different parameters, "
             "depending on the meetings' dates, times and also descriptions. "
@@ -54,133 +51,101 @@ def check_for_meetings(messages: List[Dict[str, str]], client: openai.OpenAI) ->
             "Do not include any extra text, explanation, or formatting — only the JSON objects."
         )
 
-        model = os.environ.get("MODEL", "gpt-5")
+    model = os.environ.get("MODEL", "gpt-5")
 
-        user_content = json.dumps(messages, ensure_ascii=False)
+    user_content = json.dumps(messages, ensure_ascii=False)
 
-        chat_messages = [
+    chat_messages = [
             {"role": "system", "content": instruction},
             {"role": "user", "content": user_content},
         ]
 
-        key = os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY")
-        if not key:
-            raise RuntimeError("No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment.")
+    key = os.environ.get("OPENAI_API_KEY") or os.environ.get("API_KEY")
+    if not key:
+        raise RuntimeError("No OpenAI API key provided. Set OPENAI_API_KEY or API_KEY in the environment.")
 
-        client = openai.OpenAI(
-            api_key=key,
-            base_url="https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1",
-        )
+    client = openai.OpenAI(
+        api_key=key,
+        base_url="https://fj7qg3jbr3.execute-api.eu-west-1.amazonaws.com/v1",
+    )
 
-        print(chat_messages)
+    print(chat_messages)
 
-        response = client.chat.completions.create(
-            model="gpt-4.1",
-            messages=chat_messages,
-            timeout=120
-        )
+    resp = client.chat.completions.create(
+        model="gpt-4.1",
+        messages=chat_messages,
+        timeout=120
+    )
 
-        content = response.choices[0].message.content.strip()
-        print(f"LLM response for meetings:\n{content}\n")
+    try:
+        assistant_text = resp.choices[0].message.content
+        print(f"\n[DEBUG] Raw OpenAI response for tasks:\n{assistant_text}\n")
+    except Exception as e:
+        print(f"Error extracting assistant content: {e}", file=sys.stderr)
+        return []
 
-        # Parse JSON - handle multiple formats
-        meetings = []
-
-        try:
-            parsed = json.loads(content)
-            if isinstance(parsed, list):
-                meetings = parsed
-            elif isinstance(parsed, dict):
-                meetings = [parsed]
-        except json.JSONDecodeError:
-            array_pattern = r'\[\s*\{.*?\}\s*\]'
-            array_matches = re.findall(array_pattern, content, re.DOTALL)
-            for match in array_matches:
-                try:
-                    parsed = json.loads(match)
-                    if isinstance(parsed, list):
-                        meetings.extend(parsed)
-                    elif isinstance(parsed, dict):
-                        meetings.append(parsed)
-                except json.JSONDecodeError:
-                    continue
-
-            if not meetings:
-                brace_count = 0
-                current_obj = []
-                in_string = False
-                escape_next = False
-
-                for char in content:
-                    if escape_next:
-                        current_obj.append(char)
-                        escape_next = False
-                        continue
-
-                    if char == '\\':
-                        escape_next = True
-                        current_obj.append(char)
-                        continue
-
-                    if char == '"' and not escape_next:
-                        in_string = not in_string
-                        current_obj.append(char)
-                        continue
-
-                    if not in_string:
-                        if char == '{':
-                            if brace_count == 0:
-                                current_obj = [char]
-                            else:
-                                current_obj.append(char)
-                            brace_count += 1
-                        elif char == '}':
-                            current_obj.append(char)
-                            brace_count -= 1
-                            if brace_count == 0:
-                                obj_str = ''.join(current_obj)
-                                try:
-                                    parsed = json.loads(obj_str)
-                                    if isinstance(parsed, dict):
-                                        meetings.append(parsed)
-                                except json.JSONDecodeError:
-                                    pass
-                                current_obj = []
-                        elif brace_count > 0:
-                            current_obj.append(char)
-                    else:
-                        current_obj.append(char)
-
-        if not meetings:
-            print("No meetings detected in messages")
-            return []
-
-        now_iso = datetime.utcnow().isoformat()
-        for meeting in meetings:
-            meeting["id"] = str(uuid.uuid4())
-            meeting["category"] = "meetings"
-            meeting["meeting_completed"] = False
-            meeting["created_at"] = now_iso
-
-        print(f"Extracted {len(meetings)} meeting(s)")
-        return meetings
-
-    except Exception as exc:
-            error_msg = str(exc)
-            if "503" in error_msg or "Service Unavailable" in error_msg:
-                if attempt < max_retries - 1:
-                    wait_time = (2 ** attempt) * 2
-                    print(f"Service unavailable (attempt {attempt + 1}/{max_retries}). Retrying in {wait_time}s...")
-                    time_module.sleep(wait_time)
-                    attempt += 1
-                else:
-                    print(f"Error in check_for_meetings after {max_retries} attempts: {exc}")
-                    return []
-            else:
-                print(f"Error in check_for_meetings: {exc}")
-                return []
+    # Parse multiple JSON objects (handles JSON array, single object, or line-separated objects)
+    json_objects = []
+    assistant_text = assistant_text.strip()
     
-    return []
+    # Try parsing as a single JSON value first (array or object)
+    try:
+        parsed = json.loads(assistant_text)
+        if isinstance(parsed, list):
+            json_objects = parsed
+        elif isinstance(parsed, dict):
+            json_objects = [parsed]
+    except json.JSONDecodeError:
+        # If that fails, try parsing line-by-line (JSON Lines format)
+        for line in assistant_text.splitlines():
+            line = line.strip()
+            if not line:
+                continue
+            try:
+                obj = json.loads(line)
+                if isinstance(obj, dict):
+                    json_objects.append(obj)
+            except json.JSONDecodeError as e:
+                print(f"Failed to parse line as JSON: {line[:100]}", file=sys.stderr)
+                continue
+
+    if not json_objects:
+        print(f"No valid JSON objects found in response", file=sys.stderr)
+        return []
+
+    now = datetime.now(timezone.utc)
+    created_at = now.isoformat()
+
+    augmented = []
+    for obj in json_objects:
+        if not isinstance(obj, dict):
+            print(f"Skipping non-dict task object: {obj}", file=sys.stderr)
+            continue
+        
+        obj.setdefault('id', str(uuid.uuid4()))
+        obj['category'] = 'work'
+        obj['created_at'] = created_at
+
+        task_completed = False
+        try:
+            date_str = obj.get('date_of_meeting')
+            time_str = obj.get('start_time') or '23:59'
+            if date_str:
+                task_dt = datetime.strptime(f"{date_str} {time_str}", "%Y-%m-%d %H:%M")
+                task_dt = task_dt.replace(tzinfo=timezone.utc)
+                task_completed = now > task_dt
+        except Exception:
+            task_completed = False
+
+        obj['meeting_completed'] = task_completed
+        augmented.append(obj)
+
+    print(f"\nOpenAI Response - Found {len(augmented)} task(s):")
+    for i, obj in enumerate(augmented, 1):
+        print(f"\nTask {i}:")
+        print(json.dumps(obj, indent=2, ensure_ascii=False))
+
+    return augmented
 
 
 def main() -> None:
