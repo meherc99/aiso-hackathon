@@ -66,7 +66,7 @@ def main() -> None:
 
     try:
         for entry in commands:
-            print(f"➡️  Starting {entry['name']} ({' '.join(entry['cmd'])})")
+            print(f"Starting {entry['name']} ({' '.join(entry['cmd'])})")
             proc = _spawn(entry["cmd"], entry["cwd"])
             processes.append(proc)
 
@@ -75,7 +75,7 @@ def main() -> None:
             for proc, entry in zip(processes, commands):
                 retcode = proc.poll()
                 if retcode is not None:
-                    print(f"⚠️  {entry['name']} exited with code {retcode}. Shutting down.")
+                    print(f"WARNING: {entry['name']} exited with code {retcode}. Shutting down.")
                     _terminate_all(0, None)
             # Avoid busy loop but keep the loop responsive cross-platform
             try:
