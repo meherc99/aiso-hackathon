@@ -65,6 +65,12 @@ The helper script:
 
 You’ll see tabbed logs for each component in the terminal.
 
+**Important:** This command is to run everyting in order, so it takes a long time for the app to become available. Refresh the browser multiple times after writing this command until it works.
+
+**Important:** If you would like to test the SlackBot, you can contact us so we can add you to the Slack Workspace. 
+
+
+
 ---
 
 ## 4. Running Services Manually (à la carte)
@@ -212,5 +218,6 @@ Below are small-to-medium features and improvements you might consider implement
 - Deploying the SlackBot online — After implementing the features above, the SlackBot can be deployed on Slack to ensure it can run independently from the local environment. 
 
 If you'd like, I can convert these to GitHub issues, add a prioritized backlog, or scaffold CI/tests for the project next.
+
 
 
